@@ -1,0 +1,26 @@
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+**/.env.local
+.runtime/
+# Stories, voices, private assets and downloaded corpora
+data/
+assets/
+/spine_manifest.json
+corpus/
+characters/avatars/
+characters/backgrounds/
+frontend/public/vendor/spine-3.6/spine-webgl.js
+# Local dependencies and build products
+node_modules/
+.venv/
+.next/
+__pycache__/
+*.pyc
+*.log
+*.tsbuildinfo
+next-env.d.ts
+.pytest_cache/
+.DS_Store
+Thumbs.db

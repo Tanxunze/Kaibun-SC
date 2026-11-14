@@ -1,0 +1,18 @@
+[project]
+name = "kaibun"
+version = "0.1.0"
+description = "Local bilingual dialogue story authoring and playback"
+requires-python = ">=3.11"
+license = "AGPL-3.0-or-later"
+dependencies = [
+    "fastapi>=0.143.0,<1",
+    "httpx[socks]>=0.28.1,<1",
+    "pillow>=13.0.0,<14",
+    "pypdf>=7.1.0,<8",
+    "python-dotenv>=1.1,<2",
+    "imageio-ffmpeg>=0.6,<1",
+    "uvicorn[standard]>=0.54.0,<1",
+]
+
+[tool.uv]
+package = false

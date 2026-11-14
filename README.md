@@ -1,0 +1,208 @@
+# Kaibun-SC · 怪文书
+
+闪耀色彩同人剧本生成与播放工具，支持双语对白、角色配音、立绘演出及视频导出。
+
+Kaibun 是从 [Eidolon-SC](https://github.com/Sallyn0225/eidolon-sc) 提取、修改的独立本地应用，以《偶像大师 闪耀色彩》的同人对白创作为主要使用场景。它使用你配置的语言模型构思大纲、逐幕写作，再将日语对白、中文字幕与可选的配音、人物演出组合起来播放。
+
+**这是非官方粉丝项目，与 Bandai Namco Entertainment、《偶像大师》系列及其权利人无关联，也不代表其立场。代码开源不代表取得角色、剧情、立绘或声音的使用授权。**
+
+需要 Agent 帮助部署时，让它先读本 README，再读 [部署指南](docs/DEPLOYMENT.md)。指南包含安装、模型配置、素材下载、检查步骤和常见故障处理。给 Agent 的请求示例：“请读取 README 和 docs/DEPLOYMENT.md，帮我在本机部署怪文书，先跑通文字，再配置配音和立绘。”
+
+## 能做什么
+
+- 输入故事想法、出场人物、补充要求和篇幅，生成分幕大纲与日中双语对白。
+- 自动逐幕保存，支持暂停、重启后继续生成，以及在原作品后续写。
+- 先审阅大纲，再编辑剧本；可以逐句修改、调整场景和台词顺序，或让模型生成修改预览，确认后再应用。保留最近 10 次模型修改的回退记录。
+- 导入 TXT、Markdown、DOCX 和含文字的 PDF。推荐每行 `人物：台词`，用 `第1幕 地点` 分场；双语可写作 `人物：日文 || 中文`。单语内容需要先确认翻译，再准备配音。
+- 播放、暂停、前后跳句，显示中文字幕和日语原文；支持多人同声、表情、站位和句内演出区间。
+- 可选 Fish Audio 配音，按台词内容、读音、音色和模型缓存；可补齐缺失配音、重新生成当前句。
+- 使用本地衣装与背景。支持全篇固定衣装或按剧情换装、场内背景变化，以及自行导入背景图片。
+- 将全篇或单幕导出为 MP4。视频按播放时间录制，长篇导出需要相应时间和本机资源。
+
+没有立绘时显示姓名或你自行配置的头像；没有背景素材或索引时使用中性背景；没有配置语音密钥/角色音色时使用字幕播放。这些可选素材不会阻止故事完成。
+
+不包含原项目的聊天、通话、账户、记忆、日程和社交功能；不需要安装或运行 Eidolon-SC。
+
+## 运行环境
+
+- Python 3.11 或以上，推荐由 [uv](https://docs.astral.sh/uv/getting-started/installation/) 管理。
+- Node.js 22 或以上，以及 npm。
+- 文本创作：一个支持 Chat Completions、Responses 或 Anthropic Messages 的模型服务。
+- 配音可选：Fish Audio API 密钥，以及你有权使用的音色。
+- 视频导出/衣装预览可选：Microsoft Edge，或 Playwright Chromium；导出依赖 FFmpeg，Python 依赖已包含 `imageio-ffmpeg`，也可用 `KAIBUN_FFMPEG` 指定本机程序。
+
+语言模型、配音和看图标注可能产生第三方服务费用。故事长度是创作目标，实际时长取决于台词和播放节奏。
+
+## 快速开始
+
+1. 下载本仓库到任意目录，或执行 `git clone https://github.com/qwq13243/Kaibun-SC.git` 后进入 `Kaibun-SC` 目录。
+2. 将根目录 `.env.example` 复制为 `.env`，填写 `CHAT_LLM_BASE_URL`、`CHAT_LLM_API_KEY`、`CHAT_LLM_MODEL`。按服务选择 `CHAT_LLM_PROTOCOL`；接口地址一般包含服务要求的 `/v1` 前缀。
+3. Windows 在项目根目录执行：
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\start.ps1
+   ```
+
+4. 打开 <http://localhost:3010>。
+
+首次启动会安装依赖并构建前端。更新前端源码后，用 `start.ps1 -Rebuild` 重新构建。**保持这个终端打开，按 Ctrl+C 会关闭本次启动的前后端。**启动日志位于 `.runtime/backend.log` 和 `.runtime/frontend.log`，不会进入仓库。通用启动入口为 `python start.py`，重建用 `python start.py --rebuild`；Windows 包装脚本自动使用项目虚拟环境中的 Python。
+
+也可以分两个终端手动运行（Windows、Linux、macOS）：
+
+```sh
+# 终端一：在项目根目录
+cd backend
+uv sync --locked
+uv run python server.py
+```
+
+```sh
+# 终端二：在项目根目录
+cd frontend
+npm ci
+npm run build
+npm run start
+```
+
+后端默认监听 `127.0.0.1:8011`，前端默认监听 `127.0.0.1:3010`。启动时在 `.runtime/connection.json` 写入本机前后端使用的随机访问令牌；浏览器通过前端访问，不需要把令牌贴进页面。不要公开这个文件。
+
+部署后在另一个终端检查（从项目根目录执行）：
+
+```sh
+cd backend
+uv run python scripts/doctor.py --running
+```
+
+该检查只验证本地配置和前后端连接，不调用付费模型。最终还需要在页面生成一个短篇，确认模型实际可用。
+
+**当前版本面向本机单人使用，不提供远程登录或多人隔离。不要将端口转发、隧道或反向代理开放给其他人。**后端访问令牌用于本机前后端验证，并非完整的多人账户系统。
+
+## 配置与数据
+
+完整字段见 [.env.example](.env.example)。主要配置如下：
+
+| 配置 | 用途 |
+|---|---|
+| `CHAT_LLM_*` | 大纲、对白、模型调整使用的模型与协议 |
+| `KAIBUN_BACKGROUND_LLM_*` | 衣装/背景选择和看图标注；连接、密钥和模型留空时沿用 CHAT |
+| `FISH_AUDIO_API_KEY`、`FISH_AUDIO_MODEL` | 可选配音服务 |
+| `KAIBUN_CHARACTERS_PATH` | 人物配置，默认 `characters/characters.toml` |
+| `KAIBUN_ASSET_ROOT` | 自备立绘素材根目录，默认 `assets` |
+| `KAIBUN_DATA_PATH` | 全部运行数据的根目录，默认 `data` |
+| `KAIBUN_PROXY_URL`、`KAIBUN_PROXY_SERVICES` | 可选 HTTP/SOCKS 代理与需要代理的服务 |
+| `KAIBUN_FFMPEG` | 可选 FFmpeg 程序路径 |
+
+相对路径统一相对于项目根目录解析，不依赖终端当前所在目录。故事数据库、配音、导出视频、诊断信息、背景和衣装缓存都放在数据根目录下。备份前先关闭服务，再备份整个数据目录及你自己的配置和素材。
+
+人物配置保留姓名、读音、简介、印象色等资料，并附带原配置中 29 位角色的 Fish Audio `voice_id`。只填自己的 `FISH_AUDIO_API_KEY` 即可尝试调用；音色 ID 是服务上的引用标识，不是 API 密钥，也不包含声音模型或录音。模型可能被删除、变为私有或限制调用，遇到不可用时更换为自己有权使用的音色。制作人音色可用 `KAIBUN_PRODUCER_VOICE_ID` 配置；冬优子的额外偶像声线可用 `KAIBUN_FUYUKO_IDOL_VOICE_ID` 配置，不填则沿用角色音色。
+
+人物资料在 `characters/sheets/`；创作规则在 `backend/CREATIVE_GUIDE.md`，人物补充在 `backend/character_notes.json`。这些是可修改的同人创作资料，不是官方剧情库，也不保证生成内容符合原作。
+
+需要头像时，在对应人物配置中增加相对于人物配置文件的路径，例如 `avatar = "avatars/mano.jpg"`，并自行放入你有权使用的图片。
+
+## 可选素材与来源
+
+发布包不包含游戏原始立绘、完整剧情库、背景原图、角色声音样本、个人故事或配音缓存。第三方资源是否可获取、可用于何种目的，应以权利人和来源方条款为准；公开可下载不等于允许再分发。
+
+### 立绘与衣装
+
+独立版提供自己的下载入口，使用与原项目相同的 [ShinyColorsDB](https://github.com/ShinyColorsDB) 公开目录和 CDN。**第一次建议只下载真乃的默认衣装**，确认能显示后再扩大范围。以下命令从项目根目录开始，均在 `backend` 下执行，不调用付费模型：
+
+```sh
+cd backend
+# 一位角色的默认衣装：仅3个素材文件，便于先试通。
+uv run python scripts/fetch_stands.py --character mano
+# 全部29位角色的默认衣装；已完成文件直接复用。
+uv run python scripts/fetch_stands.py
+# 某位角色的全部衣装（可能有数十至上百套）。
+uv run python scripts/fetch_stands.py --character mano --all
+# 全角色全部衣装：数据量可能达到数GB，逐个限频下载，可能需要数小时。
+uv run python scripts/fetch_stands.py --all
+```
+
+`--character` 可重复，例如 `--character mano --character hiori`。人物 id 见 `characters/characters.toml`。下载成功会输出 `READY`，最后输出 `FINISHED ready=... missing=...`；返回码 0 表示本次所选范围完整，2 表示有缺失或来源暂不可用。重新运行相同命令可接着补齐。下载器单连接、请求间隔至少 1 秒；遇到 401/403/429 会停止，不能用并发或连续重试绕过限制。文件缺失时本版保留已下载内容，不尝试绕过来源限制。
+
+Spine 运行库是另一项可选依赖。请先阅读其许可说明；具备相应使用权时，可从固定的官方源提交下载：
+
+```sh
+# 仍在 backend 目录；仅下载运行库并核对 SHA-256，不下载衣装。
+uv run python scripts/fetch_stands.py --runtime
+```
+
+若 GitHub 原始文件下载超时，可以配置终端 `HTTPS_PROXY` 后重试；也可以从 [固定版本源文件](https://github.com/EsotericSoftware/spine-runtimes/blob/654c20e5b0e523040b6366bbd1042510d2645134/spine-ts/build/spine-webgl.js) 自行保存文件，放入下述目录。许可文本随仓库保留，运行库不自动随代码发布。
+
+立绘兼容原项目使用的 Spine 3.6 数据组织方式。目录示例：
+
+```text
+assets/
+  spine/idols/stand/1030010010/
+    data.json
+    data.atlas
+    data.png
+spine_manifest.json
+```
+
+`spine_manifest.json` 放在素材根目录的父目录。它是数组，每项至少含 `idolId` 和 `path`，例如 `{"idolId":1,"path":"spine/idols/stand/1030010010/","dressName":"衣装名称"}`。人物配置中的 `idol_id` 与其对应，`default_outfit` 写为 `stand/1030010010`。该目录约定继承自原项目及其使用的 [ShinyColorsDB](https://github.com/ShinyColorsDB) 素材目录。
+
+**Spine 运行库不随本发布包分发。**如果你有相应使用权，请自行提供匹配的 `spine-webgl.js`，放在 `frontend/public/vendor/spine-3.6/`。来源、原版本信息与许可证见该目录的说明及 [LICENSING.md](LICENSING.md)。原项目的 AGPL 附加许可不替代 Esoteric Software 自身的许可要求。
+
+准备衣装预览和文字索引（项目根目录执行）：
+
+```sh
+cd backend
+uv run python scripts/index_wardrobe.py --prepare-images --character mano
+# 下列步骤会向已配置的模型发送衣装图片，可能计费：
+uv run python scripts/index_wardrobe.py --index --character mano
+```
+
+可用 `--character mano` 指定人物，去掉它处理默认范围，`--all` 处理整个本地目录。看图模型由 `KAIBUN_BACKGROUND_LLM_*` 配置，需支持图片输入。Microsoft Edge 已安装时可直接用于预览；否则在 `frontend` 目录运行 `npx playwright install chromium`。看图失败时，先选择“全篇固定”并手选一套衣装，可以不做模型选装。已完成场景不会自动重新选装。
+
+衣装选择兼容 `outfits` 字典和 `choices` / `scenes` 场景列表等模型输出。返回格式有误时，会携带具体原因自动请求修正一次；仍失败则保留正文和已完成配音，可继续重试。选装诊断保存在数据目录的 `diagnostics/`，可能包含模型回复，不随代码发布。
+
+下载后重启后端；运行库新增后也重启前端。**Kaibun 自己提供素材代理，不需要原项目的 8765 静态服务、S3 桶、OAuth 或 `EIDOLON_STAND_ASSETS_URL`。**
+
+### 背景
+
+最直接的方式是在界面的“场景背景”中导入自己的 PNG、JPEG 或 WebP。不准备剧情库也可以按已知编号下载背景，编号必须是 5 位：
+
+```sh
+cd backend
+# 小范围示例，编号是否仍可下载以来源实际响应为准。
+uv run python scripts/fetch_backgrounds.py --ids 00133 00538
+# 下载后标注常用背景，自动选图才可检索到；此步骤会调用看图模型。
+uv run python scripts/fetch_backgrounds.py --prepare-index --limit 2
+```
+
+编号可从 [公开剧情查看器](https://viewer.shinycolors.moe/) 所用剧情 JSON 的 `bg` 字段获取；不要通过扫描整个编号空间批量探测资源。你也可以使用已有、合法取得的剧情缓存，从其中的背景编号建立下载清单：
+
+```sh
+cd backend
+uv run python scripts/fetch_backgrounds.py --scripts /path/to/your/cached/scripts
+# 下载后再标注少量常用背景；此步骤调用模型看图：
+uv run python scripts/fetch_backgrounds.py --prepare-index --limit 30
+```
+
+下载脚本继承原项目的公开剧情查看器地址 [viewer.shinycolors.moe](https://viewer.shinycolors.moe/)，保存来源、引用与校验信息，单连接限频，遇到拒绝访问或限流会停止。仓库不附带用于建立清单的剧情缓存。你可以完全不使用此下载功能。
+
+已经在本机部署过 Eidolon-SC 的用户，可将 `--scripts` 指向旧项目的 `corpus/mirror/scripts`；只读其中的背景引用，不读取聊天数据库。本应用不需要原项目的剧情向量化/嵌入模型，也不需要为了背景而下载完整剧情库。背景文件、缩略图和标注位于 `KAIBUN_DATA_PATH/backgrounds`；有文件但没标注时可手动选图，自动选图会使用中性背景兜底。
+
+### 字体与声音
+
+界面使用系统字体，不需要构建时下载字体。配音由使用者配置的 Fish Audio 服务生成；本包附带角色音色引用 ID，不附带 API 密钥、原作音频、音色模型或参考录音。可在 [Fish Audio](https://fish.audio/) 查询和更换音色；能否访问及是否收费，以服务当前状态和条款为准。
+
+## 来源、修改与权利
+
+本项目基于 [Eidolon-SC](https://github.com/Sallyn0225/eidolon-sc)，沿用其人物/读音处理、模型协议适配、立绘渲染和部分界面代码。2026-11-14 的独立版整理包括：拆除聊天应用依赖、统一配置和数据路径、修复场景身份冲突及导入结构、恢复衣装选择逻辑、补齐无素材/无语音模式、明确关闭数据库连接、限制本机监听并增加后端访问验证。
+
+- 项目代码与文档采用 **GNU AGPL-3.0-or-later**，见 [LICENSE](LICENSE)。保留原项目版权及许可声明；发布修改版时应保留来源与修改说明。
+- Spine 的 AGPL 第 7 节附加许可及适用范围见 [LICENSING.md](LICENSING.md)。第三方组件保留各自许可证，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+- 《偶像大师 闪耀色彩》及其角色、设定、原作台词、立绘、背景、声音等相关权利归 **Bandai Namco Entertainment Inc. 及各自权利人**。代码许可证不覆盖这些权利。
+- 仓库人物资料、创作指导和同人补充不构成官方设定声明；生成结果可能出错，其使用与发布仍需核对所涉权利。
+- 若修改后通过网络向其他使用者提供服务，应按 AGPL 第 13 节提供运行版本的对应源代码。不要用上游仓库链接代替你实际修改版本的源码。
+- 收到权利人的有效要求时，应处理相关内容；不要将本项目的粉丝性质或免责声明理解为授权。
+
+## 隐私
+
+故事、提示词、人物资料和修改要求会发送给你选择的模型服务；图片标注会发送相关图片；配音会向语音服务发送需要朗读的文本。服务商的数据政策由各服务商规定。
+
+`.env`、`.runtime/`、`data/`、自备素材和构建产物已加入忽略规则。提交代码前仍应检查实际变更；忽略规则不能清除已经提交过的敏感文件及其历史。运行数据只保存在你配置的目录中，本项目没有账户同步或遥测功能。

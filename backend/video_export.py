@@ -120,7 +120,7 @@ class VideoExport:
                 return None
             stat = path.stat()
             voices.append((line['id'], path.name, stat.st_size, stat.st_mtime_ns))
-        data = {'version': 19, 'scenes': doc['scenes'], 'outline': doc.get('outline'), 'voices': voices}
+        data = {'version': 20, 'scenes': doc['scenes'], 'outline': doc.get('outline'), 'voices': voices}
         return hashlib.sha256(json.dumps(data, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
     def output_path(self, doc):

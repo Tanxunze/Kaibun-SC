@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<script type="importmap">{"imports":{"@/":"/src/"}}</script>
+<script src="/vendor/spine-3.6/spine-webgl.js"></script>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#242731;font-family:'Microsoft YaHei','Noto Sans CJK SC',sans-serif}
+#bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0}
+#stage{position:absolute;inset:0;overflow:hidden;z-index:1}
+.actor{position:absolute;top:0;bottom:0}
+canvas{width:100%;height:100%;display:block}
+.fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:white;font-size:48px}
+#sub{position:absolute;z-index:20;bottom:30px;left:8%;width:84%;padding:15px 36px;border-radius:22px;text-align:center;font-weight:bold;font-size:48px;line-height:1.35;color:white;-webkit-text-stroke:1px black;paint-order:stroke fill;text-shadow:0 1px 2px black}
+</style>
+</head>
+<body>
+<img id="bg" hidden><div id="stage"></div><div id="sub"></div>
+<script type="module">
+import {StandEngine} from '/src/components/conversations/stand/StandEngine';
+const stage=document.querySelector('#stage'),bg=document.querySelector('#bg'),sub=document.querySelector('#sub');
+// A slot owns a permanent canvas/context. Reassign slots instead of retaining 29 engines.
+const slots=[];
+const painted=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+let background='',failure=null,live=[];
+function ensureHealthy(){if(failure)throw Error(failure);for(const slot of live)if(slot.engine&&slot.gl.isContextLost())throw Error('Export WebGL context was lost');}
+function slotAt(index){
+ if(slots[index])return slots[index];
+ const node=document.createElement('div'),canvas=document.createElement('canvas'),label=document.createElement('div');
+ node.className='actor';label.className='fallback';node.append(canvas,label);stage.append(node);
+ canvas.addEventListener('webglcontextlost',()=>{failure='Export WebGL context was lost';});
+ const slot={node,canvas,label,engine:null,gl:null,outfit:null,actor:null};slots.push(slot);return slot;
+}
+async function setBackground(url){
+ if(url===background)return;
+ background=url;
+ if(!url){bg.hidden=true;bg.removeAttribute('src');return;}
+ bg.src=url;await bg.decode();
+ if(!bg.naturalWidth)throw Error('Export background failed to decode: '+url);
+ bg.hidden=false;
+}
+window.show=async item=>{
+ ensureHealthy();
+ if(item.actors.length>7)throw Error('Export shot exceeds seven actors');
+ await setBackground(item.background||'');
+ sub.textContent=item.zh;sub.style.backgroundColor=item.color+'c7';
+ const used=new Set();live=[];
+ for(const [i,actor] of item.actors.entries()){
+  let slot=slots.find(s=>s.actor===actor.id&&!used.has(s));
+  if(!slot)slot=slots.find(s=>!used.has(s)&&!item.actors.some(a=>a.id===s.actor));
+  if(!slot)slot=slotAt(slots.length);
+  used.add(slot);live.push(slot);slot.actor=actor.id;slot.node.style.display='block';
+  const width=innerWidth,count=item.actors.length;
+  slot.node.style.width=width+'px';slot.node.style.left=((i+.5)*width/count-width/2)+'px';
+  slot.node.style.opacity=actor.isSpeaker?'1':'0.85';slot.node.style.zIndex=actor.isSpeaker?'10':String(i);
+  slot.canvas.style.display=actor.outfit?'block':'none';slot.label.style.display=actor.outfit?'none':'flex';
+  if(!actor.outfit){slot.label.textContent=actor.name||actor.id;continue;}
+  if(!window.spine)throw Error('Spine runtime is missing; cannot export the configured stands');
+  if(!slot.engine){slot.engine=new StandEngine(slot.canvas,window.spine,'waist');slot.gl=slot.canvas.getContext('webgl');}
+  if(slot.outfit!==actor.outfit){await slot.engine.load({id:actor.outfit,url:'/assets/spine/idols/'+actor.outfit+'/'});slot.outfit=actor.outfit;}
+  slot.engine.fullFrameHeight=actor.height*(count<=2?.66:count===3?.72:count<=5?.80:.88);
+  slot.engine.direct({mood:actor.mood,bodyMood:actor.bodyMood||undefined,bodyVariant:actor.variant,speaking:actor.speaking,looking:true,nod:null},false);
+ }
+ for(const slot of slots)if(!used.has(slot))slot.node.style.display='none';
+ sub.style.fontSize='48px';while(sub.offsetHeight>183&&parseFloat(sub.style.fontSize)>37)sub.style.fontSize=(parseFloat(sub.style.fontSize)-1)+'px';
+ await painted();ensureHealthy();
+};
+window.setSegment=(item,index)=>{
+ const seg=item.segments?.[index];if(!seg)return;
+ for(const actor of item.actors){
+  const state=seg.actor_states?.[actor.id];if(!state&&!actor.isSpeaker)continue;
+  const slot=slots.find(s=>s.actor===actor.id),mood=state?.emotion||(actor.isSpeaker?seg.emotion:actor.mood)||actor.mood;
+  slot?.engine?.direct({mood,bodyMood:state?(state.body_mood||mood):(seg.body_mood||mood),bodyVariant:actor.variant,speaking:actor.speaking,looking:true,nod:null},false);
+ }
+ ensureHealthy();
+};
+window.prepare=async entries=>{
+ const resources=new Set();
+ for(const item of entries){if(item.background)resources.add(item.background);for(const actor of item.actors)if(actor.outfit)for(const file of ['data.json','data.atlas','data.png'])resources.add('/assets/spine/idols/'+actor.outfit+'/'+file);}
+ const urls=[...resources];let next=0;
+ await Promise.all(Array.from({length:4},async()=>{while(next<urls.length){const url=urls[next++],response=await fetch(url);if(!response.ok)throw Error('Missing export asset: '+url);await response.arrayBuffer();}}));
+ // Only initialize the first shot. Later shots reuse this bounded pool.
+ if(entries.length)await window.show(entries[0]);
+};
+window.exportState=()=>{ensureHealthy();return {contexts:slots.filter(s=>s.engine).length,visible:live.map(s=>s.actor),background:background,backgroundReady:!background||(!bg.hidden&&bg.complete&&bg.naturalWidth>0),subtitle:sub.textContent};};
+window.ready=true;
+</script>
+</body>
+</html>

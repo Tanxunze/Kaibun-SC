@@ -304,7 +304,7 @@ birthday = "02-24"
 age = 17
 idol_id = 10
 default_outfit = "stand/1030100010"
-voice_id = "a48ea1f5d81a478ba528b49188bf4ccc"
+voice_id = "cf7120197a7c4ef8a97d2c51db5addce"
 
 [[characters]]
 id = "juri"
@@ -320,7 +320,7 @@ birthday = "11-26"
 age = 17
 idol_id = 11
 default_outfit = "stand/1030110010"
-voice_id = "8875da3542374b18a29b85fbf48f0de2"
+voice_id = "148239e4ed3d4cbcb23fead807ace7e9"
 
 [[characters]]
 id = "rinze"

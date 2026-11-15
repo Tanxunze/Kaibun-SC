@@ -48,8 +48,10 @@ def subtitle_pages(text, limit=60):
 
 def cast_for(lines, index, cast):
     line = lines[index]
+    def ordered(visible):
+        return list(dict.fromkeys([cid for cid in line.get('actor_order', []) if cid in visible] + visible))
     if 'screen_cast' in line:
-        return [cid for cid in line['screen_cast'] if cid in cast][:7]
+        return ordered([cid for cid in line['screen_cast'] if cid in cast][:7])
     present = set(line.get('onstage', cast))
     present.add(line.get('speaker'))
     chosen = []
@@ -57,7 +59,7 @@ def cast_for(lines, index, cast):
         if cid in cast and cid in present and cid not in chosen and len(chosen) < 5:
             chosen.append(cid)
     if line.get('speakers'):
-        return [cid for cid in cast if cid in line['speakers']][:7]
+        return ordered([cid for cid in cast if cid in line['speakers']][:7])
     add(line.get('speaker'))
     if line.get('focus'):
         anchor = index
@@ -68,7 +70,7 @@ def cast_for(lines, index, cast):
     else:
         for entry in list(reversed(lines[max(0, index - 5):index])) + lines[index + 1:index + 5]:
             add(entry.get('speaker'))
-    return [cid for cid in cast if cid in chosen]
+    return ordered([cid for cid in cast if cid in chosen])
 
 
 def pose_for(lines, index, cast, cid):
@@ -118,7 +120,7 @@ class VideoExport:
                 return None
             stat = path.stat()
             voices.append((line['id'], path.name, stat.st_size, stat.st_mtime_ns))
-        data = {'version': 17, 'scenes': doc['scenes'], 'outline': doc.get('outline'), 'voices': voices}
+        data = {'version': 18, 'scenes': doc['scenes'], 'outline': doc.get('outline'), 'voices': voices}
         return hashlib.sha256(json.dumps(data, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
     def output_path(self, doc):

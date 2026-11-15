@@ -1,6 +1,11 @@
 type Turn = { performance_segments?: {emotion?: string; body_mood?: string | null; actor_states?: Record<string, {emotion?: string; body_mood?: string | null}>}[]; speaker: string; speakers?: string[]; onstage?: string[]; focus?: string[]; id?: string; emotion?: string; body_mood?: string | null; screen_cast?: string[]; actor_states?: Record<string, { emotion?: string; body_mood?: string | null }> };
 export type StandBounds = { width: number; height: number };
 
+/** Keep the chosen shot membership, arranging it by the saved left-to-right order. */
+export function orderedStageCast(visible: readonly string[], order: readonly string[] = []): string[] {
+  return [...new Set([...order.filter(id => visible.includes(id)), ...visible])];
+}
+
 /** The people in this exchange; being in the room does not put everyone in the shot. */
 export function stageCast(lines: readonly Turn[], index: number, cast: readonly string[], limit = 5): string[] {
   const current = lines[index];

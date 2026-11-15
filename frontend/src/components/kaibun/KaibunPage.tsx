@@ -5,7 +5,7 @@ import { MarkedAvatar } from "@/components/app/MarkedAvatar";
 import { StoryFineTune } from "./StoryFineTune";
 import { performancePose, segmentAt } from "./performance";
 import { StoryStage } from "./StoryStage";
-import { stageCast, stagePoses, speechPassage } from "./stage";
+import { stageCast, stagePoses, speechPassage, orderedStageCast } from "./stage";
 import { StoryLibrary } from "./StoryLibrary";
 import { StoryOutfits } from "./StoryOutfits";
 import { SceneOutfits } from "./SceneOutfits";
@@ -372,7 +372,7 @@ function StoryPlayer({ story, actors, names, voice, jump, compact, editing, prev
     return () => { active = false; clearTimeout(timer); clearInterval(segmentTimer); audio.forEach(player => player.pause()); setSpeaking(false); };
   }, [voiceKey, playing, sound, audioFor, next, transitioning]);
   const cast = story.outline?.cast ?? [];
-  const focused = line?.screen_cast ? line.screen_cast : line?.speakers?.length ? cast.filter(id => line.speakers?.includes(id)).slice(0, 7) : line ? stageCast(line.scene.lines, line.scene.lines.findIndex(l => l.id === line.id), cast, 5) : [];
+  const focused = orderedStageCast(line?.screen_cast ? line.screen_cast : line?.speakers?.length ? cast.filter(id => line.speakers?.includes(id)).slice(0, 7) : line ? stageCast(line.scene.lines, line.scene.lines.findIndex(l => l.id === line.id), cast, 5) : [], line?.actor_order);
   const passage = line ? speechPassage(line.scene.lines, line.scene.lines.findIndex(l => l.id === line.id)) : null;
   const presentation = line ? scenePresentation(line.scene, line.id) : null;
   const sceneActors = actors.map(actor => {

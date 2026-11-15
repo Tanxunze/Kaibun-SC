@@ -7,14 +7,14 @@ export function StoryCastOrder({ actors, order, selected, onOrder, onSelected }:
 }) {
   const root = useRef<HTMLDivElement>(null);
   const previous = useRef(new Map<string, DOMRect>());
-  const gesture = useRef<{id: string; x: number; y: number; active: boolean; original: string[]} | null>(null);
+  const gesture = useRef<{id: string; x: number; y: number; active: boolean; original: string[]; current: string[]; boxes: {id:string;box:DOMRect}[]} | null>(null);
   const [drag, setDrag] = useState<{id: string; x: number; y: number} | null>(null);
   const ids = [...order.filter(id => actors.some(a => a.id === id)), ...actors.map(a => a.id).filter(id => !order.includes(id))];
   useLayoutEffect(() => {
     const next = new Map<string, DOMRect>();
     root.current?.querySelectorAll<HTMLElement>("[data-cast-id]").forEach(node => {
       const id = node.dataset.castId!; const box = node.getBoundingClientRect(); const old = previous.current.get(id);
-      if (old && (old.x !== box.x || old.y !== box.y)) node.animate([{transform:`translate(${old.x-box.x}px,${old.y-box.y}px)`},{transform:"translate(0,0)"}], {duration:160,easing:"ease-out"});
+      if (!gesture.current && old && (old.x !== box.x || old.y !== box.y)) node.animate([{transform:`translate(${old.x-box.x}px,${old.y-box.y}px)`},{transform:"translate(0,0)"}], {duration:160,easing:"ease-out"});
       next.set(id, box);
     });
     previous.current = next;
@@ -24,17 +24,19 @@ export function StoryCastOrder({ actors, order, selected, onOrder, onSelected }:
     if (cancel && state?.active) onOrder(state.original);
     gesture.current = null; setDrag(null);
   }
-  return <div ref={root} className="flex flex-wrap gap-2 select-none" onDragStart={e => e.preventDefault()} onContextMenu={e => {if(gesture.current?.active)e.preventDefault();}}>
+  return <div ref={root} className="flex flex-wrap gap-2 select-none" onDragStart={e => e.preventDefault()} onContextMenu={e => {if(gesture.current?.active)e.preventDefault();}}
+    onPointerMove={e => {
+      const state=gesture.current;if(!state)return;
+      if(!state.active && Math.hypot(e.clientX-state.x,e.clientY-state.y)<5)return;
+      state.active=true;setDrag({id:state.id,x:e.clientX,y:e.clientY});
+      const target=state.boxes.filter(n=>n.id!==state.id).sort((a,b)=>Math.hypot(e.clientX-(a.box.left+a.box.width/2),e.clientY-(a.box.top+a.box.height/2))-Math.hypot(e.clientX-(b.box.left+b.box.width/2),e.clientY-(b.box.top+b.box.height/2)))[0];
+      if(!target)return;const box=target.box;
+      const remaining=state.original.filter(v=>v!==state.id);let at=remaining.indexOf(target.id);if(e.clientX>box.left+box.width/2)at++;
+      remaining.splice(at,0,state.id);
+      if(remaining.join('|')!==state.current.join('|')){state.current=remaining;onOrder(remaining);}
+    }} onPointerUp={() => finish()} onPointerCancel={() => finish(true)} onLostPointerCapture={() => {if(gesture.current)finish(true);}}>
     {ids.map(id => <div key={id} data-cast-id={id} className={cn("flex touch-none select-none items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm", drag?.id===id ? "opacity-30" : "cursor-grab active:cursor-grabbing")}
-      onPointerDown={e => { if(e.button!==0 || (e.target as HTMLElement).closest("input"))return; e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); gesture.current={id,x:e.clientX,y:e.clientY,active:false,original:ids}; }}
-      onPointerMove={e => {
-        const state=gesture.current;if(!state || state.id!==id)return;
-        if(!state.active && Math.hypot(e.clientX-state.x,e.clientY-state.y)<5)return;
-        state.active=true;setDrag({id,x:e.clientX,y:e.clientY});
-        const nodes=Array.from(root.current!.querySelectorAll<HTMLElement>("[data-cast-id]"));
-        const target=nodes.filter(n=>n.dataset.castId!==id).sort((a,b)=>{const x=a.getBoundingClientRect(),y=b.getBoundingClientRect();return Math.hypot(e.clientX-(x.left+x.width/2),e.clientY-(x.top+x.height/2))-Math.hypot(e.clientX-(y.left+y.width/2),e.clientY-(y.top+y.height/2));})[0];
-        if(!target)return;const box=target.getBoundingClientRect();const remaining=ids.filter(v=>v!==id);let at=remaining.indexOf(target.dataset.castId!);if(e.clientX>box.left+box.width/2)at++;remaining.splice(at,0,id);if(remaining.join('|')!==ids.join('|'))onOrder(remaining);
-      }} onPointerUp={() => finish()} onPointerCancel={() => finish(true)}>
+      onPointerDown={e => { if(e.button!==0 || (e.target as HTMLElement).closest("input"))return; e.preventDefault(); root.current!.setPointerCapture(e.pointerId); gesture.current={id,x:e.clientX,y:e.clientY,active:false,original:ids,current:ids,boxes:Array.from(root.current!.querySelectorAll<HTMLElement>("[data-cast-id]")).map(node=>({id:node.dataset.castId!,box:node.getBoundingClientRect()}))}; }}>
       <input aria-label={actors.find(a=>a.id===id)?.name} type="checkbox" checked={selected.includes(id)} onChange={e=>onSelected(e.target.checked?[...selected,id]:selected.filter(v=>v!==id))}/>
       <span className="pointer-events-none">{actors.find(a=>a.id===id)?.name}</span>
     </div>)}

@@ -28,6 +28,7 @@ from store import StoryStore  # noqa: E402
 from performance import normalize_segments, recover_split_audio
 from production import cached_audio, voice_lines  # noqa: E402
 from video_export import VideoExport  # noqa: E402
+from voice_errors import voice_failure
 
 
 def create_app(store, adapter, api_token=None):
@@ -332,9 +333,11 @@ def create_app(store, adapter, api_token=None):
         speaker: str | None = None
         speakers: list[str] | None = None
         voice_style: Literal["natural", "idol"] | None = None
+        nichika_voice_style: Literal['natural', 'idol'] | None = None
         emotion: Literal["calm", "happy", "shy", "surprised", "sad", "angry", "thinking"] | None = None
         body_mood: Literal["calm", "happy", "shy", "surprised", "sad", "angry", "thinking"] | None = None
         actor_states: dict[str, dict[str, str | None]] | None = None
+        listener_state_persist: bool | None = None
         onstage: list[str] | None = None
         screen_cast: list[str] | None = None
         actor_order: list[str] | None = None
@@ -356,6 +359,8 @@ def create_app(store, adapter, api_token=None):
         if not body.zh.strip() or body.ja is not None and not body.ja.strip():
             raise HTTPException(422, "台词不能为空")
         line["zh"] = body.zh.strip()
+        if body.listener_state_persist is not None:
+            line['listener_state_persist'] = body.listener_state_persist
         if body.ja is not None:
             line["ja"] = body.ja.strip()
         if body.voice_style is not None and line["speaker"] == "fuyuko":
@@ -384,7 +389,7 @@ def create_app(store, adapter, api_token=None):
             for cid, state in body.actor_states.items():
                 if cid not in adapter.characters or not isinstance(state, dict):
                     raise HTTPException(422, '角色动作设置无效')
-                states[cid] = {key: value for key, value in state.items() if key in ('emotion', 'body_mood') and value in ('calm', 'happy', 'shy', 'surprised', 'sad', 'angry', 'thinking')}
+                states[cid] = {key: value for key, value in state.items() if key in ('emotion', 'body_mood') and (value in ('calm', 'happy', 'shy', 'surprised', 'sad', 'angry', 'thinking') or key == 'body_mood' and value is None)}
             line['actor_states'] = states
         if body.performance_segments is not None:
             try:
@@ -409,6 +414,8 @@ def create_app(store, adapter, api_token=None):
         # Commit the edit before voice generation: a provider failure must not lose it.
         if body.voice_style is not None and line['speaker'] == 'fuyuko':
             line['voice_style'] = body.voice_style
+        if body.nichika_voice_style is not None and 'nichika' in (line.get('speakers') or [line['speaker']]):
+            line['nichika_voice_style'] = body.nichika_voice_style
         current_voice = [(target['id'], adapter.voice_signature(target)[0]) for target in targets]
         if previous_voice != current_voice:
             line['audio_revision'] = uuid.uuid4().hex
@@ -416,8 +423,12 @@ def create_app(store, adapter, api_token=None):
         if body.regenerate:
             try:
                 await asyncio.gather(*(author.production.ensure_voice(id, target) for target in targets))
-            except Exception:
-                raise HTTPException(502, '修改已保存，部分语音生成失败，可重试') from None
+            except Exception as error:
+                from revisions import fingerprint
+                return JSONResponse(status_code=502, content={
+                    'detail': '修改已保存；' + voice_failure(error) + '。原有配音文件保留。',
+                    'saved_fingerprint': fingerprint(doc),
+                })
         if body.edit_token:
             line['last_fine_edit_token'] = body.edit_token
         store.save(doc)

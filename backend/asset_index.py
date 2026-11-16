@@ -6,6 +6,7 @@ import json
 import re
 import uuid
 from pathlib import Path
+from outfit_policy import automatic_outfit
 
 VERSION = "wardrobe-observations-v1"
 
@@ -61,11 +62,16 @@ class OutfitIndex:
         path = self.path(oid)
         if not path:
             return None
-        try:
-            row = json.loads(path.read_text(encoding="utf-8"))
-            return row if row.get("id") == oid and row.get("image_hash") == self.image_hash(oid) and row.get("version") == VERSION else None
-        except (OSError, ValueError, AttributeError):
-            return None
+        # Observations describe an image, and remain valid after changing selector models.
+        paths = [path, *[p for p in (self.wardrobe.directory / 'annotations').glob('*/' + path.name) if p != path]]
+        for candidate in paths:
+            try:
+                row = json.loads(candidate.read_text(encoding='utf-8'))
+                if row.get('id') == oid and row.get('image_hash') == self.image_hash(oid) and row.get('version') == VERSION:
+                    return row
+            except (OSError, ValueError, AttributeError):
+                continue
+        return None
 
     async def annotate(self, ids, batch_size=10):
         """Observe already prepared images in small batches. Caller explicitly authorizes this stage."""
@@ -141,7 +147,7 @@ class OutfitIndex:
 
     def candidates(self, cid, context, limit=8, required=()):
         rows = [self.read(oid) for oid in self.wardrobe.by_character.get(cid, [])]
-        rows = [row for row in rows if row]
+        rows = [row for row in rows if row and automatic_outfit(row['id'])]
         terms = set(re.findall(r"[A-Za-z]{3,}|[\u4e00-\u9fff]{2,}", context.lower()))
         terms |= {term[i:i + 2] for term in list(terms) for i in range(len(term) - 1)}
         default = self.wardrobe.adapter.characters[cid].default_outfit

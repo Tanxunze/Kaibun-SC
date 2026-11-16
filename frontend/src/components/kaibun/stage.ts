@@ -1,4 +1,4 @@
-type Turn = { performance_segments?: {emotion?: string; body_mood?: string | null; actor_states?: Record<string, {emotion?: string; body_mood?: string | null}>}[]; speaker: string; speakers?: string[]; onstage?: string[]; focus?: string[]; id?: string; emotion?: string; body_mood?: string | null; screen_cast?: string[]; actor_states?: Record<string, { emotion?: string; body_mood?: string | null }> };
+type Turn = { listener_state_persist?: boolean; performance_segments?: {emotion?: string; body_mood?: string | null; actor_states?: Record<string, {emotion?: string; body_mood?: string | null}>}[]; speaker: string; speakers?: string[]; onstage?: string[]; focus?: string[]; id?: string; emotion?: string; body_mood?: string | null; screen_cast?: string[]; actor_states?: Record<string, { emotion?: string; body_mood?: string | null }> };
 export type StandBounds = { width: number; height: number };
 
 /** Keep the chosen shot membership, arranging it by the saved left-to-right order. */
@@ -38,16 +38,20 @@ export function stagePoses(lines: readonly Turn[], index: number, cast: readonly
     : stageCast(lines, i, cast, limit);
   const result: Record<string, { mood: string; bodyVariant: number; bodyMood?: string }> = {};
   for (const actor of visible(index)) {
-    for (let i = index; i >= 0 && visible(i).includes(actor); i--) {
-      const turn = lines[i];
-      const lastSegment = i < index ? turn.performance_segments?.at(-1) : undefined;
-      const state = lastSegment?.actor_states?.[actor] ?? turn.actor_states?.[actor];
-      if (state || turn.speaker === actor || turn.speakers?.includes(actor)) {
-        const mood = state?.emotion || ((turn.speaker === actor || turn.speakers?.includes(actor)) ? lastSegment?.emotion : undefined) || turn.emotion || "calm";
-        const body = state ? state.body_mood : lastSegment?.body_mood ?? turn.body_mood;
-        result[actor] = { mood, bodyVariant: Math.max(0, lines.slice(0, i + 1).filter(t => t.speaker === actor || t.speakers?.includes(actor)).length - 1), ...(body || state ? {bodyMood: body || mood} : {}) };
-        break;
+    let carry: {emotion?: string; body_mood?: string | null} = {};
+    let variant = 0;
+    for (let i = 0; i <= index; i++) {
+      const turn = lines[i], speaker = (turn.speakers || [turn.speaker]).includes(actor);
+      if (!visible(i).includes(actor)) { carry = {}; if (speaker) variant++; continue; }
+      if (speaker) { carry = {emotion:turn.emotion || "calm",body_mood:turn.body_mood}; variant++; }
+      const current = {...carry, ...turn.actor_states?.[actor]};
+      if (i < index) for (const segment of turn.performance_segments || []) {
+        if (speaker) {current.emotion = segment.emotion || current.emotion || "calm"; current.body_mood = segment.body_mood;}
+        Object.assign(current, segment.actor_states?.[actor]);
       }
+      const mood = current.emotion || "calm";
+      result[actor] = {mood,bodyVariant:Math.max(0,variant-1),...(current.body_mood ? {bodyMood:current.body_mood} : {})};
+      if (speaker || turn.listener_state_persist !== false) carry = current;
     }
   }
   return result;

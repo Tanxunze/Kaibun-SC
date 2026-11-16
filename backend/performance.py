@@ -20,7 +20,7 @@ def normalize_segments(segments, line, cast):
         for cid, state in states.items():
             if cid not in cast or not isinstance(state, dict) or state.get('emotion', 'calm') not in MOODS or state.get('body_mood') not in MOODS | {None, ''}:
                 raise ValueError('人物演出设置无效')
-            clean[cid] = dict(emotion=state.get('emotion', 'calm'), body_mood=state.get('body_mood') or None)
+            clean[cid] = {key: (value or None) if key == 'body_mood' else value for key, value in state.items() if key in ('emotion', 'body_mood')}
         emotion = seg.get('emotion', line.get('emotion', 'calm'))
         if emotion not in MOODS or seg.get('body_mood') not in MOODS | {None, ''}:
             raise ValueError('区间表情或动作无效')

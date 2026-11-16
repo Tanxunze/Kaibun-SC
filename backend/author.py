@@ -134,6 +134,26 @@ def validate_scene(raw, outline, index):
             if not isinstance(focus, list) or len(focus) > 7 or any(not isinstance(cid, str) or cid not in outline["cast"] for cid in focus):
                 raise StoryFormatError("focus需要包含至多7个当前交流人物的偶像id")
             direction["focus"] = list(dict.fromkeys(focus))
+        if 'actor_states' in line:
+            states = line['actor_states']
+            if not isinstance(states, dict):
+                raise StoryFormatError('actor_states需要按人物id保存表情与动作')
+            checked = {}
+            for cid, state in states.items():
+                if cid not in outline['cast'] or not isinstance(state, dict):
+                    raise StoryFormatError('actor_states包含未知人物或无效状态')
+                if any(key not in ('emotion', 'body_mood') or (value not in EMOTIONS and not (key == 'body_mood' and value is None)) for key, value in state.items()):
+                    raise StoryFormatError('人物表情或动作无效')
+                checked[cid] = dict(state)
+            direction['actor_states'] = checked
+        if 'listener_state_persist' in line:
+            if not isinstance(line['listener_state_persist'], bool):
+                raise StoryFormatError('listener_state_persist需要布尔值')
+            direction['listener_state_persist'] = line['listener_state_persist']
+        if 'body_mood' in line:
+            if line['body_mood'] is not None and line['body_mood'] not in EMOTIONS:
+                raise StoryFormatError('身体动作无效')
+            direction['body_mood'] = line['body_mood']
         clean.append(direction)
     memory = raw.get("memory")
     if not isinstance(memory, str) or not memory.strip():
@@ -276,6 +296,8 @@ class Author:
                         '"zh":"中文","kind":"dialogue","emotion":"calm/happy/shy/surprised/sad/angry/thinking","voice_style":"冬优子声线natural或idol，其他角色省略","onstage":["房间内在场的偶像id"],"focus":["本句画面里交流的1至7位偶像id"],"speakers":["异口同声时的2至7位偶像id，可省略"]}],'
                         '"memory":"合并后的简短故事记录：已发生的事、每人知道或误会什么、心意与回应带来的关系变化、约定和尚待回应的事情"}。'
                         'onstage记录现场人物；focus选择本次交流中的说话者与交谈对象，话题转向别人时切换画面，制作人以字幕呈现。'
+                        '为非发言人物按其自身处境设置actor_states，例如{"hiori":{"emotion":"thinking","body_mood":"calm"}}。'
+                        '人物反应发生变化时才更新，不跟随主说话人的情绪逐句变化；保持同镜头人物的独立情绪。'
                         '冬优子在外人面前维持可爱偶像形象的发言用idol声线，与熟人私下以本来语气说话用natural；根据实际情境逐句选择。'
                         '输出前核对称呼、说话者、人物已知信息和动作衔接，保留临场变化和自然的闲话。',
                         validate=lambda raw: validate_scene(raw, outline, index), doc=doc, stage=stage)

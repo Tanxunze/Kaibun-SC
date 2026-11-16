@@ -9,6 +9,8 @@
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#242731;font-family:'Microsoft YaHei','Noto Sans CJK SC',sans-serif}
 #bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0}
 #stage{position:absolute;inset:0;overflow:hidden;z-index:1}
+.bank{position:absolute;inset:0;visibility:hidden}
+.background{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .actor{position:absolute;top:0;bottom:0}
 canvas{width:100%;height:100%;display:block}
 .fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:white;font-size:48px}
@@ -16,118 +18,162 @@ canvas{width:100%;height:100%;display:block}
 </style>
 </head>
 <body>
-<img id="bg" hidden><div id="stage"></div><div id="sub"></div>
+<div id="stage"></div><div id="sub"></div>
 <script type="module">
 import {StandEngine} from '/src/components/conversations/stand/StandEngine';
-const stage=document.querySelector('#stage'),bg=document.querySelector('#bg'),sub=document.querySelector('#sub');
-// A slot owns a permanent canvas/context. Reassign slots instead of retaining 29 engines.
-const slots=[];
+const stage=document.querySelector('#stage'),sub=document.querySelector('#sub');
 const painted=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-let background='',failure=null,live=[];
-function prepareSubtitles(item){
- const text=item.zh||'';
- // Chinese character counts do not identify timing boundaries in Japanese speech.
- // Show the complete line throughout its audio, measuring it offscreen before painting.
- const measure=sub.cloneNode(false);
- measure.removeAttribute('id');
- const computed=getComputedStyle(sub);
- for(const key of ['fontFamily','fontWeight','padding','boxSizing','textAlign','wordBreak','overflowWrap'])measure.style[key]=computed[key];
- Object.assign(measure.style,{position:'fixed',visibility:'hidden',pointerEvents:'none',width:sub.getBoundingClientRect().width+'px',height:'auto',minHeight:'0',fontSize:'48px',lineHeight:'1.35'});
- document.body.append(measure);
- let height=0;
- const maxHeight=text.length<=240?183:Math.max(183,innerHeight*.32);
- for(let size=48;size>=14;size--){
-  measure.style.fontSize=size+'px';
-  measure.textContent=text;height=measure.getBoundingClientRect().height;
-  if(height<=maxHeight||size===14){sub.style.fontSize=size+'px';break;}
- }
- measure.remove();
- sub.style.minHeight=Math.ceil(height)+'px';
- sub.style.backgroundColor=item.color+'c7';
- sub.textContent=text;
+let failure=null,active=null;
+let referenceHeight=0;
+const banks=[],slots=[],layouts=new Map();
+function healthy(){
+ if(failure)throw Error(failure);
+ for(const slot of slots)if(slot.engine&&slot.gl.isContextLost())throw Error('Export WebGL context was lost');
 }
-function ensureHealthy(){if(failure)throw Error(failure);for(const slot of live)if(slot.engine&&slot.gl.isContextLost())throw Error('Export WebGL context was lost');}
-function slotAt(index){
- if(slots[index])return slots[index];
+function bankAt(index){
+ if(banks[index])return banks[index];
+ const node=document.createElement('div'),bg=new Image();
+ node.className='bank';bg.className='background';bg.hidden=true;node.append(bg);stage.append(node);
+ const bank={node,bg,background:'',slots:[],key:null,visible:[]};banks.push(bank);return bank;
+}
+function slotAt(bank,index){
+
  const node=document.createElement('div'),canvas=document.createElement('canvas'),label=document.createElement('div');
- node.className='actor';label.className='fallback';node.append(canvas,label);stage.append(node);
+ node.className='actor';label.className='fallback';node.append(canvas,label);bank.node.append(node);
  canvas.addEventListener('webglcontextlost',()=>{failure='Export WebGL context was lost';});
  const slot={node,canvas,label,engine:null,gl:null,outfit:null,actor:null};slots.push(slot);return slot;
 }
-async function setBackground(url){
- if(url===background)return;
- background=url;
- if(!url){bg.hidden=true;bg.removeAttribute('src');return;}
- bg.src=url;await bg.decode();
- if(!bg.naturalWidth)throw Error('Export background failed to decode: '+url);
- bg.hidden=false;
+function shotKey(item){return JSON.stringify([item.background||'',item.actors.map(a=>[a.id,a.outfit||null,a.height||1000,a.name||''])]);}
+function subtitleLayout(text){
+ if(layouts.has(text))return layouts.get(text);
+ const measure=sub.cloneNode(false);measure.removeAttribute('id');const computed=getComputedStyle(sub);
+ for(const key of ['fontFamily','fontWeight','padding','boxSizing','textAlign','wordBreak','overflowWrap'])measure.style[key]=computed[key];
+ Object.assign(measure.style,{position:'fixed',visibility:'hidden',pointerEvents:'none',width:sub.getBoundingClientRect().width+'px',height:'auto',minHeight:'0',lineHeight:'1.35'});
+ document.body.append(measure);
+ const maxHeight=text.length<=240?183:Math.max(183,innerHeight*.32);let layout;
+ for(let size=48;size>=14;size--){
+  measure.style.fontSize=size+'px';measure.textContent=text;const height=measure.getBoundingClientRect().height;
+  if(height<=maxHeight||size===14){layout={fontSize:size+'px',minHeight:Math.ceil(height)+'px'};break;}
+ }
+ measure.remove();layouts.set(text,layout);return layout;
 }
-window.show=async item=>{
- ensureHealthy();
- if(item.actors.length>7)throw Error('Export shot exceeds seven actors');
- await setBackground(item.background||'');
- const used=new Set();live=[];
- for(const [i,actor] of item.actors.entries()){
-  let slot=slots.find(s=>s.actor===actor.id&&!used.has(s));
-  if(!slot)slot=slots.find(s=>!used.has(s)&&!item.actors.some(a=>a.id===s.actor));
-  if(!slot)slot=slotAt(slots.length);
-  used.add(slot);live.push(slot);slot.actor=actor.id;slot.node.style.display='block';
-  const width=innerWidth,count=item.actors.length;
-  slot.node.style.width=width+'px';slot.node.style.left=((i+.5)*width/count-width/2)+'px';
-  slot.node.style.opacity=actor.isSpeaker?'1':'0.85';slot.node.style.zIndex=actor.isSpeaker?'10':String(i);
+function directionFor(item,actor,index=0){
+ const segment=item.segments?.[index];
+ const state=Object.assign({},...(item.segments||[]).slice(0,index+1).map(part=>part.actor_states?.[actor.id]||{}));
+ const explicit=Object.keys(state).length>0;
+ const mood=state.emotion||(actor.isSpeaker?segment?.emotion:undefined)||actor.mood;
+ const bodyMood=explicit?('body_mood' in state?state.body_mood||undefined:actor.bodyMood):(actor.isSpeaker&&segment?segment.body_mood||undefined:actor.bodyMood);
+ return {mood,bodyMood:bodyMood||undefined,bodyVariant:actor.variant,speaking:actor.speaking,looking:true,nod:null};
+}
+function direct(bank,item){
+ for(const actor of item.actors){
+  const slot=bank.slots.find(s=>s.actor===actor.id);
+  slot.node.style.opacity=actor.isSpeaker?'1':'0.85';slot.node.style.zIndex=actor.isSpeaker?'10':String(item.actors.indexOf(actor));
+  slot.engine?.direct(directionFor(item,actor),false);
+ }
+}
+async function prepareShot(item){
+ healthy();if(item.actors.length>7)throw Error('Export shot exceeds seven actors');
+ const key=shotKey(item);
+ if(active?.key===key)return active; // A subtitle/speaker change must not reload or pause engines.
+ const bank=bankAt(active===banks[0]?1:0);
+
+ bank.node.style.visibility='hidden';bank.key=null;
+ if(bank.background!==(item.background||'')){
+  if(item.background){const image=new Image();image.src=item.background;await image.decode();if(!image.naturalWidth)throw Error('Export background failed to decode');bank.bg.src=item.background;bank.bg.hidden=false;}
+  else{bank.bg.hidden=true;bank.bg.removeAttribute('src');}
+  bank.background=item.background||'';
+ }
+ const used=new Set();bank.visible=[];bank.slots=[];
+ for(const actor of item.actors){
+  // A retained actor keeps the exact live skeleton/track clocks until the atomic commit.
+  let slot=active?.slots.find(s=>s.actor===actor.id&&s.outfit===(actor.outfit||null)&&!used.has(s));
+  if(slot){used.add(slot);bank.slots.push(slot);bank.visible.push(actor.id);continue;}
+  slot=slots.find(s=>!used.has(s)&&!active?.slots.includes(s)&&s.actor===actor.id&&s.outfit===(actor.outfit||null));
+  if(!slot)slot=slots.find(s=>!used.has(s)&&!active?.slots.includes(s));
+  if(!slot)slot=slotAt(bank,0);
+  used.add(slot);bank.slots.push(slot);bank.visible.push(actor.id);slot.actor=actor.id;bank.node.append(slot.node);
+  slot.node.style.display='block';slot.node.style.width=innerWidth+'px';
   slot.canvas.style.display=actor.outfit?'block':'none';slot.label.style.display=actor.outfit?'none':'flex';
-  if(!actor.outfit){slot.label.textContent=actor.name||actor.id;continue;}
+  if(!actor.outfit){slot.label.textContent=actor.name||actor.id;slot.outfit=null;continue;}
   if(!window.spine)throw Error('Spine runtime is missing; cannot export the configured stands');
   if(!slot.engine){slot.engine=new StandEngine(slot.canvas,window.spine,'waist');slot.gl=slot.canvas.getContext('webgl');}
   if(slot.outfit!==actor.outfit){await slot.engine.load({id:actor.outfit,url:'/assets/spine/idols/'+actor.outfit+'/'});slot.outfit=actor.outfit;}
-  slot.engine.fullFrameHeight=actor.height*(count<=2?.66:count===3?.72:count<=5?.80:.88);
-  slot.engine.direct({mood:actor.mood,bodyMood:actor.bodyMood||undefined,bodyVariant:actor.variant,speaking:actor.speaking,looking:true,nod:null},false);
+  slot.engine.direct(directionFor(item,actor),false);
+  slot.engine.setPaused(false);
  }
- for(const slot of slots)if(!used.has(slot))slot.node.style.display='none';
- prepareSubtitles(item);
- await painted();ensureHealthy();
-};
+ await painted();healthy();
+ for(const slot of bank.slots)if(!active?.slots.includes(slot))slot.engine?.setPaused(true);
+ bank.key=key;return bank;
+}
+function commitShot(bank,item){
+ healthy();
+ if(active!==bank){
+  if(active){active.node.style.visibility='hidden';for(const slot of active.slots)if(!bank.slots.includes(slot)){slot.node.style.display='none';slot.engine?.setPaused(true);}}
+  for(const slot of bank.slots){bank.node.append(slot.node);slot.node.style.display='block';}
+  bank.node.style.visibility='visible';active=bank;
+  for(const slot of bank.slots)slot.engine?.setPaused(false);
+ }
+ const reference=referenceHeight||Math.max(1,...item.actors.filter(a=>a.outfit).map(a=>a.height||1000));
+ const ratio=item.actors.length<=3?.74:item.actors.length<=5?.82:.90;
+ const height=reference*ratio,bottom=reference*(1.06-ratio);
+ for(const [index,actor] of item.actors.entries()){
+  const slot=bank.slots.find(s=>s.actor===actor.id);
+  slot.node.style.width=innerWidth+'px';slot.node.style.left=((index+.5)*innerWidth/item.actors.length-innerWidth/2)+'px';
+  if(slot.engine)slot.engine.groundFrame={height,bottom};
+ }
+ direct(bank,item);
+ Object.assign(sub.style,subtitleLayout(item.zh||''));sub.style.backgroundColor=item.color+'c7';sub.textContent=item.zh||'';
+}
+window.show=async item=>{const bank=await prepareShot(item);commitShot(bank,item);await painted();healthy();};
 window.setSegment=(item,index)=>{
- const seg=item.segments?.[index];if(!seg)return;
+ const segment=item.segments?.[index];if(!segment)return;
  for(const actor of item.actors){
-  const state=seg.actor_states?.[actor.id];if(!state&&!actor.isSpeaker)continue;
-  const slot=slots.find(s=>s.actor===actor.id),mood=state?.emotion||(actor.isSpeaker?seg.emotion:actor.mood)||actor.mood;
-  slot?.engine?.direct({mood,bodyMood:state?(state.body_mood||mood):(seg.body_mood||mood),bodyVariant:actor.variant,speaking:actor.speaking,looking:true,nod:null},false);
+  const state=Object.assign({},...item.segments.slice(0,index+1).map(part=>part.actor_states?.[actor.id]||{}));
+  const explicit=Object.keys(state).length>0;if(!explicit&&!actor.isSpeaker)continue;
+  const slot=active.slots.find(s=>s.actor===actor.id);
+  slot?.engine?.direct(directionFor(item,actor,index),false);
  }
- ensureHealthy();
+ healthy();
 };
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,Math.max(0,ms)));
 window.playLine=async item=>{
- const duration=item.duration*1000,cueDuration=(item.cue_duration||item.duration)*1000;
- const events=[];
- for(const [index,segment] of (item.segments||[]).entries()){
-  if(index)events.push({at:cueDuration*(segment.start??index/item.segments.length),segment:index});
- }
- window.setSegment(item,0);
- events.sort((a,b)=>a.at-b.at);
- const started=performance.now();
- const waitUntil=async deadline=>{
-  while(performance.now()-started<deadline){
-   await new Promise(resolve=>setTimeout(resolve,Math.min(250,Math.max(0,deadline-(performance.now()-started)))));
-   ensureHealthy();
-  }
- };
- for(const event of events){
-  await waitUntil(event.at);
-  if(event.segment!==undefined)window.setSegment(item,event.segment);
- }
- await waitUntil(duration);
- return {started:started/1000,ended:performance.now()/1000};
+ const started=performance.now(),duration=item.duration*1000,cueDuration=(item.cue_duration||item.duration)*1000;
+ const waitUntil=async deadline=>{while(performance.now()-started<deadline){await wait(Math.min(250,deadline-(performance.now()-started)));healthy();}};
+ for(const [index,segment] of (item.segments||[]).entries())if(index){await waitUntil(cueDuration*(segment.start??index/item.segments.length));window.setSegment(item,index);}
+ await waitUntil(duration);return {started:started/1000,ended:performance.now()/1000};
 };
 window.prepare=async entries=>{
+ referenceHeight=Math.max(1,...entries.flatMap(item=>item.actors.filter(actor=>actor.outfit).map(actor=>actor.height||1000)));
  const resources=new Set();
- for(const item of entries){if(item.background)resources.add(item.background);for(const actor of item.actors)if(actor.outfit)for(const file of ['data.json','data.atlas','data.png'])resources.add('/assets/spine/idols/'+actor.outfit+'/'+file);}
- const urls=[...resources];let next=0;
+ for(const item of entries){subtitleLayout(item.zh||'');if(item.background)resources.add(item.background);for(const actor of item.actors)if(actor.outfit)for(const file of ['data.json','data.atlas','data.png'])resources.add('/assets/spine/idols/'+actor.outfit+'/'+file);}
+ let next=0;const urls=[...resources];
  await Promise.all(Array.from({length:4},async()=>{while(next<urls.length){const url=urls[next++],response=await fetch(url);if(!response.ok)throw Error('Missing export asset: '+url);await response.arrayBuffer();}}));
- // Only initialize the first shot. Later shots reuse this bounded pool.
  if(entries.length)await window.show(entries[0]);
 };
-window.exportState=()=>{ensureHealthy();return {contexts:slots.filter(s=>s.engine).length,visible:live.map(s=>s.actor),background:background,backgroundReady:!background||(!bg.hidden&&bg.complete&&bg.naturalWidth>0),subtitle:sub.textContent};};
+window.installCalibration=()=>{const marker=document.createElement('div');marker.id='export-calibration';marker.style.cssText='position:fixed;inset:0;z-index:99999;background:rgb(255,0,255)';document.body.append(marker);};
+window.renderStory=async entries=>{
+ let start=null;const offsets=[];
+ let pending=entries.length?prepareShot(entries[0]).then(bank=>({bank}),error=>({error})):null;
+ for(let i=0;i<entries.length;i++){
+  const item=entries[i],prepared=await pending;if(prepared.error)throw prepared.error;
+  const transition=({short:400,medium:800,long:1400})[item.transition_length]||400;
+  if(i&&item.transition==='pause')await wait(transition);
+  if(i&&item.transition==='fade')await document.body.animate([{opacity:1},{opacity:0}],{duration:transition/2,fill:'forwards'}).finished;
+  if(start===null)await new Promise(resolve=>requestAnimationFrame(now=>{commitShot(prepared.bank,item);document.querySelector('#export-calibration')?.remove();start=now/1000;resolve();}));
+  else commitShot(prepared.bank,item);
+  const playback=window.playLine(item);
+  if(i&&item.transition==='fade')await document.body.animate([{opacity:0},{opacity:1}],{duration:transition/2,fill:'forwards'}).finished;
+  // Give the committed shot a paint before decoding the next shot; keep one audio clock.
+  pending=i+1<entries.length?painted().then(()=>prepareShot(entries[i+1])).then(bank=>({bank}),error=>({error})):null;
+  const timing=await playback;offsets.push(timing.started-start);
+  console.log(JSON.stringify({progress:i+1}));healthy();
+ }
+ return {offsets,elapsed:performance.now()/1000-start,renderer_version:25,calibration_marker:true};
+};
+window.exportState=()=>{healthy();return {contexts:slots.filter(s=>s.engine).length,visible:active?.visible||[],background:active?.background||'',backgroundReady:!active?.background||(active.bg.complete&&active.bg.naturalWidth>0),subtitle:sub.textContent};};
 window.ready=true;
+
 </script>
 </body>
 </html>

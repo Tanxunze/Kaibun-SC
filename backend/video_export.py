@@ -46,6 +46,30 @@ def subtitle_pages(text, limit=60):
     return pages or ['']
 
 
+def calibration_lead(exe, video):
+    """Locate the first real frame after the magenta leader, using decoded frame timestamps."""
+    flags = 0x08000000 if os.name == 'nt' else 0
+    result = subprocess.run([exe, '-hide_banner', '-v', 'info', '-i', str(video), '-t', '180',
+                             '-vf', 'crop=16:16:0:0,scale=1:1,format=rgb24,showinfo',
+                             '-fps_mode', 'passthrough', '-f', 'rawvideo', 'pipe:1'],
+                            capture_output=True, creationflags=flags)
+    if result.returncode:
+        raise ValueError('无法校准导出视频的音画起点，请重新导出')
+    frames = result.stdout
+    timestamps = [float(value) for value in re.findall(rb'pts_time:([\d.eE+-]+)', result.stderr)]
+    marker_seen = False
+    for index, timestamp in enumerate(timestamps):
+        pixel = frames[index * 3:index * 3 + 3]
+        if len(pixel) != 3:
+            break
+        marker = pixel[0] > 200 and pixel[1] < 65 and pixel[2] > 200
+        if marker:
+            marker_seen = True
+        elif marker_seen:
+            return timestamp
+    raise ValueError('未找到完整的导出校准帧，请重新导出，不复用旧录制缓存')
+
+
 def cast_for(lines, index, cast):
     line = lines[index]
     def ordered(visible):
@@ -74,18 +98,8 @@ def cast_for(lines, index, cast):
 
 
 def pose_for(lines, index, cast, cid):
-    for i in range(index, -1, -1):
-        line = lines[i]
-        if cid not in cast_for(lines, i, cast):
-            break
-        segment = (line.get('performance_segments') or [{}])[-1] if i < index else {}
-        state = segment.get('actor_states', {}).get(cid, line.get('actor_states', {}).get(cid))
-        speaker = line.get('speaker') == cid or cid in (line.get('speakers') or [])
-        if state is not None or speaker:
-            mood = (state or {}).get('emotion') or (segment.get('emotion') if speaker else None) or line.get('emotion') or 'calm'
-            body = state.get('body_mood') or mood if state is not None else segment.get('body_mood', line.get('body_mood'))
-            return mood, max(0, sum(1 for turn in lines[:i+1] if turn.get('speaker') == cid or cid in (turn.get('speakers') or [])) - 1), body
-    return 'calm', 0, None
+    from stage_states import pose_for as resolve
+    return resolve(lines, index, cast, cid, cast_for)
 
 
 class VideoExport:
@@ -120,7 +134,7 @@ class VideoExport:
                 return None
             stat = path.stat()
             voices.append((line['id'], path.name, stat.st_size, stat.st_mtime_ns))
-        data = {'version': 20, 'scenes': doc['scenes'], 'outline': doc.get('outline'), 'voices': voices}
+        data = {'version': 25, 'scenes': doc['scenes'], 'outline': doc.get('outline'), 'voices': voices}
         return hashlib.sha256(json.dumps(data, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
     def output_path(self, doc):
@@ -337,7 +351,7 @@ class VideoExport:
             probe = subprocess.run([exe, '-i', str(temp / 'record.webm')], capture_output=True, text=True, encoding='utf-8', errors='replace', creationflags=flags)
             match = re.search(r'Duration: (\d+):(\d+):([\d.]+)', probe.stderr)
             recorded = (int(match[1]) * 3600 + int(match[2]) * 60 + float(match[3])) if match else timing['elapsed']
-            lead = max(0, timing.get('recording_start', recorded - timing['elapsed']))
+            lead = calibration_lead(exe, temp / 'record.webm') if timing.get('calibration_marker') else max(0, timing.get('recording_start', recorded - timing['elapsed']))
             job['message'] = '正在生成视频文件'
             result = subprocess.run([exe, '-y', '-v', 'error', '-ss', str(lead), '-i', str(temp / 'record.webm'), '-i', str(temp / 'audio.wav'), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '17', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', '-shortest', str(temp / 'result.mp4')], capture_output=True, creationflags=flags)
             if result.returncode:

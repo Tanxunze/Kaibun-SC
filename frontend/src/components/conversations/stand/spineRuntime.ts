@@ -133,6 +133,8 @@ export type AnimationState = {
   setEmptyAnimation(track: number, mixDuration: number): TrackEntry;
   addEmptyAnimation(track: number, mixDuration: number, delay: number): TrackEntry;
   getCurrent(track: number): TrackEntry | null;
+  /** Release only animations queued after this entry, preserving its current playback. */
+  disposeNext(entry: TrackEntry): void;
   update(delta: number): void;
   apply(skeleton: Skeleton): boolean;
 };
@@ -145,5 +147,6 @@ export type TrackEntry = {
   animationStart: number;
   animationEnd: number;
   mixDuration: number;
+  next: TrackEntry | null;
   listener: { complete?: (entry: TrackEntry) => void } | null;
 };

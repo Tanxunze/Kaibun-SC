@@ -11,6 +11,7 @@ import httpx
 
 from support.llm import merge_extra_body
 from paths import data_root
+from outfit_policy import automatic_outfit, DAILY_DEFAULTS
 from asset_index import OutfitIndex, atomic_json, parse_object, provider_id
 
 
@@ -230,7 +231,10 @@ class Wardrobe:
                 continue  # Name/avatar staging works without proprietary stand assets.
             existing = [i for i in range(len(scenes)) if cid in plans[i]]
             if mode == 'fixed':
-                chosen = next((plans[i][cid] for i in existing), None) or requested.get(cid) or self.adapter.characters[cid].default_outfit or options[0]['id']
+                default = DAILY_DEFAULTS.get(cid, self.adapter.characters[cid].default_outfit)
+                chosen = next((plans[i][cid] for i in existing), None) or requested.get(cid) or (default if self.outfit(cid,default) and automatic_outfit(default) else next((o['id'] for o in options if automatic_outfit(o['id'])),None))
+                if chosen is None:
+                    continue
                 for i, plan in enumerate(plans):
                     chosen = plan.setdefault(cid, chosen)
                     for line in scenes[i].get('lines', []):
@@ -251,7 +255,7 @@ class Wardrobe:
             context = json.dumps(dict(premise=doc.get('premise', ''), places=[s.get('place', '') for s in scenes]), ensure_ascii=False)
             candidates = self.index.candidates(cid, context, limit=8, required=[latest, requested.get(cid)])
             if not candidates:
-                ids = [o['id'] for o in options[:8]]
+                ids = [o['id'] for o in options if automatic_outfit(o['id'])][:8]
                 await self.prepare_images(ids)
                 await self.index.annotate(ids)
                 candidates = self.index.candidates(cid, context, limit=8, required=[latest, requested.get(cid)])
@@ -263,7 +267,7 @@ class Wardrobe:
                            scenes=[dict(scene=i, place=s.get('place', ''), lines=[dict(id=l.get('id'), speaker=l.get('speaker'), zh=l.get('zh', '')) for l in s.get('lines', [])],
                                         existing_outfit=plans[i].get(cid), existing_changes={lid: m[cid] for lid, m in changes[i].items() if cid in m})
                                    for i, s in enumerate(scenes)])
-            cache_key = hashlib.sha256(json.dumps(dict(provider=provider_id(self.adapter), version=3, context=payload), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+            cache_key = hashlib.sha256(json.dumps(dict(provider=provider_id(self.adapter), version=4, context=payload), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
             cache = self.directory / 'choices' / (cache_key + '.json')
             allowed = {r['id'] for r in candidates}
             raw = None

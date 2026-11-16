@@ -55,6 +55,10 @@ def speech_names(text, characters):
     if replacements:
         pattern = '|'.join(re.escape(k) for k in sorted(replacements, key=len, reverse=True))
         text = re.sub(pattern, lambda m: replacements[m[0]], text)
+    if 'natsuha' in characters:
+        # Katakana identifies the final ハ as part of a name, never the topic particle は.
+        text = text.replace('夏叶', 'ナツハ').replace('なつは', 'ナツハ')
+        text = re.sub(r'(?<![A-Za-z])Natsuha(?![A-Za-z])', 'ナツハ', text, flags=re.IGNORECASE)
     toru = characters.get('toru')
     if toru and getattr(toru, 'name_kana', None):
         # A quoted mention, honorific or following particle identifies the name.

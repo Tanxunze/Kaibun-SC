@@ -191,7 +191,7 @@ color = "#ffc639"
 birthday = "03-17"
 age = 15
 idol_id = 23
-default_outfit = "stand/1030230010"
+default_outfit = "stand/1040230010"
 voice_id = "565ffd381fbc427ebfa1cc4c689ac12d"
 
 [[characters]]
@@ -207,8 +207,8 @@ color = "#a6ceb6"
 birthday = "07-26"
 age = 16
 idol_id = 24
-default_outfit = "stand/1030240010"
-voice_id = "b3757a5a71ba4078be1e25b446190975"
+default_outfit = "stand/1030240020"
+voice_id = "0f9ccd4265f146cc91aba1a0914cfb24"
 
 [[characters]]
 id = "mikoto"
@@ -304,7 +304,7 @@ birthday = "02-24"
 age = 17
 idol_id = 10
 default_outfit = "stand/1030100010"
-voice_id = "cf7120197a7c4ef8a97d2c51db5addce"
+voice_id = "18532b5e23b44ada8d5c9b53870ee551"
 
 [[characters]]
 id = "juri"

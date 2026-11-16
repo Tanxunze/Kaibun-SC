@@ -63,6 +63,9 @@ type Pose = {
 type Shown = {
   /** 身体动作按哪种心情选的：心情变了才换身体动作。 */
   mood: Emotion | null;
+  /** Requested final body animation; the current track may still be its relay. */
+  body: string | null;
+  relay: string | null;
   face: string | null;
   /** 口型的名字和开合，例如 `lip_smile open`。 */
   mouth: string | null;
@@ -83,6 +86,8 @@ type Clip = { slot: Slot; end: SlotData; detached: boolean };
 export class StandEngine {
   /** Optional common camera scale used by multi-character story shots. */
   fullFrameHeight?: number;
+  /** Export ensemble camera: one native-unit scale and ground-relative crop for all actors. */
+  groundFrame?: { height: number; bottom: number };
   private readonly gl: WebGLRenderingContext;
   private readonly renderer: SceneRenderer;
   private readonly assets: AssetManager;
@@ -228,7 +233,7 @@ export class StandEngine {
       bounds: { x: offset.x, y: offset.y, width: size.x, height: size.y },
       clips: new Map(),
       // 立绘到之前的点头已经过去了，不补。
-      shown: { mood: null, face: null, mouth: null, eye: null, nod: this.direction.nod?.id ?? null },
+      shown: { mood: null, body: null, relay: null, face: null, mouth: null, eye: null, nod: this.direction.nod?.id ?? null },
     };
   }
 
@@ -305,7 +310,7 @@ export class StandEngine {
   private follow(pose: Pose): void {
     const { state, shown } = pose;
     const want = pickAnimations(this.direction, pose.animations, this.reducedMotion);
-    if (shown.mood !== this.direction.mood || state.getCurrent(TRACK.body)?.animation.name !== want.body) {
+    if (shown.body !== want.body) {
       shown.mood = this.direction.mood;
       this.playBody(pose, want.body);
     }
@@ -343,18 +348,30 @@ export class StandEngine {
    * 换身体动作。带 `loop_start` 事件的，开头播一次，之后从 `loop_start` 起循环尾段；没有的整段循环。
    * 离开带 `relay` 事件的动作时，先播它指定的 `arm_down*` 把抬起的手放下，再接下一个动作。
    */
-  private playBody({ state, data, animations }: Pose, name: string): void {
+  private playBody({ state, data, animations, shown }: Pose, name: string): void {
     if (!animations.has(name)) return;
     const current = state.getCurrent(TRACK.body);
-    if (current?.animation.name === name) return;
+    if (current?.animation.name === name && !current.next) {
+      shown.body = name;
+      shown.relay = null;
+      return;
+    }
     const relay = current && this.event(data, current.animation.name, "relay");
     let entry: TrackEntry;
-    if (relay && animations.has(relay.value)) {
-      state.setAnimation(TRACK.body, relay.value, false);
-      entry = state.addAnimation(TRACK.body, name, false, 0);
+    if (current && shown.relay === current.animation.name) {
+      // Preserve the active lowering animation; only replace its queued destination.
+      state.disposeNext(current);
+      entry = state.addAnimation(TRACK.body, name, false, Math.max(current.animation.duration, 0.000001));
+    } else if (relay && animations.has(relay.value)) {
+      const lowering = state.setAnimation(TRACK.body, relay.value, false);
+      shown.relay = relay.value;
+      // Delay 0 starts defaultMix seconds early in Spine 3.6, truncating the authored motion.
+      entry = state.addAnimation(TRACK.body, name, false, Math.max(lowering.animation.duration, 0.000001));
     } else {
       entry = state.setAnimation(TRACK.body, name, false);
+      shown.relay = null;
     }
+    shown.body = name;
     const loopStart = this.event(data, name, "loop_start");
     if (!loopStart) {
       entry.loop = true;
@@ -427,6 +444,13 @@ export class StandEngine {
   /** 按取景对准镜头：贴着头顶，高度是身体的一段，宽度不窄于身体的约 70%，左右居中；全身时整个人居中。 */
   private aim({ bounds }: Pose, aspect: number): void {
     const camera = this.renderer.camera;
+    if (this.groundFrame) {
+      const {height, bottom} = this.groundFrame;
+      camera.position.x = bounds.x + bounds.width / 2;
+      camera.position.y = bounds.y + bottom + height / 2;
+      camera.setViewport(height * aspect, height);
+      return;
+    }
     if (this.framing === "full") {
       // 全身：整个人放进画面，四周留一点空，上下左右居中。
       const viewHeight = Math.max(this.fullFrameHeight ?? 0, Math.max(bounds.height, bounds.width / aspect) * (1 + 2 * HEADROOM));

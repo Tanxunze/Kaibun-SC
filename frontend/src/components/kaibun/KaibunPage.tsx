@@ -23,7 +23,7 @@ import { copy } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { BackIcon, StoryIcon, StoryNewIcon, StoryPlayIcon, StoryPauseIcon, StoryPreviousIcon, StoryNextIcon, LetterSoundIcon, LetterMutedIcon } from "@/theme/icons";
 import { Ja } from "@/theme/Ja";
-import { request, type Actor, type Story, type StoryBrief, type StoryLength, type Line } from "./api";
+import { request, migrateOutfitDefaults, type Actor, type Story, type StoryBrief, type StoryLength, type Line } from "./api";
 
 const t = copy.kaibun;
 
@@ -56,21 +56,22 @@ export function KaibunPage() {
   const [voice, setVoice] = useState(false);
   const deleted = useRef(new Set<string>());
   const draftLoaded = useRef(false);
+  const draftNeedsOutfitMigration = useRef(false);
   useEffect(() => {
     try {
       const draft = JSON.parse(localStorage.getItem("kaibun-composer-draft") || "null");
-      if (draft) { setPremise(draft.premise || ""); setDetails(draft.details || ""); setCast(draft.cast || []); setOutfits(draft.outfits || {}); setOutfitMode(draft.outfitMode || "story"); setLength(draft.length || "short"); setContinuing(draft.continuing || null); }
+      if (draft) { draftNeedsOutfitMigration.current = draft.outfitPolicyVersion !== 1; setPremise(draft.premise || ""); setDetails(draft.details || ""); setCast(draft.cast || []); setOutfits(draft.outfits || {}); setOutfitMode(draft.outfitMode || "story"); setLength(draft.length || "short"); setContinuing(draft.continuing || null); }
     } catch {} finally { setTimeout(() => { draftLoaded.current = true; }, 0); }
   }, []);
   useEffect(() => {
-    if (selected || !draftLoaded.current) return;
-    try { localStorage.setItem("kaibun-composer-draft", JSON.stringify({ premise, details, cast, outfits, outfitMode, length, continuing })); } catch {}
-  }, [selected, premise, details, cast, outfits, outfitMode, length, continuing]);
+    if (selected || !draftLoaded.current || !actors.length) return;
+    try { localStorage.setItem("kaibun-composer-draft", JSON.stringify({ premise, details, cast, outfits, outfitMode, length, continuing, outfitPolicyVersion:1 })); } catch {}
+  }, [selected, premise, details, cast, outfits, outfitMode, length, continuing, actors.length]);
   const readLibrary = useCallback(() => request<StoryBrief[]>("stories").then(items => { pruneDeletedStoryDrafts(items); setStories(items.filter(item => !deleted.current.has(item.id))); }), []);
   useEffect(() => {
     let active = true;
     Promise.all([request<Actor[]>("characters"), request<StoryBrief[]>("stories"), request<{ voice: boolean }>("health")])
-      .then(([actors, stories, health]) => { if (active) { setActors(actors); setStories(stories); setVoice(health.voice); pruneDeletedStoryDrafts(stories); } })
+      .then(([actors, stories, health]) => { if (active) { if (draftNeedsOutfitMigration.current) {setOutfits(current => migrateOutfitDefaults(current,actors));draftNeedsOutfitMigration.current=false;} setActors(actors); setStories(stories); setVoice(health.voice); pruneDeletedStoryDrafts(stories); } })
       .catch((e) => { if (active) setError(e.message); });
     return () => { active = false; };
   }, []);
@@ -144,7 +145,7 @@ export function KaibunPage() {
       <main className="min-w-0 flex-1">
         <div className="flex items-center justify-between border-b px-4 py-2 lg:hidden"><details className="relative"><summary className="cursor-pointer py-1 text-sm">{t.library} · {stories.length}</summary><div className="absolute left-0 z-20 max-h-96 w-72 overflow-y-auto rounded-lg border bg-background">{library}</div></details><Button variant="ghost" onClick={() => { setContinuing(null); setSelected(null); }}><StoryNewIcon />{t.newStory}</Button></div>
         {error && <div role="alert" className="mx-auto mt-4 flex max-w-4xl items-center gap-3 rounded-lg border px-4 py-3 text-sm"><span className="min-w-0 flex-1">{error}</span><Button variant="outline" onClick={() => window.location.reload()}>{t.retry}</Button></div>}
-        {selected ? story ? story.tuning && story.tuning !== "production" ? <StoryTune key={story.id} story={story} actors={actors} onUpdated={setStory} /> : <StoryView key={story.id} story={story} actors={actors} voice={voice} onUpdated={setStory} onRevise={() => { void revise(story); }} onContinue={() => { void request<Story>("stories/" + story.id + "/pause-for-edit", {}).then(() => { setContinuing(story.id); setCast(story.outline?.cast ?? []); setOutfits(story.scenes.at(-1)?.outfits ?? {}); setLength(story.length); setPremise(story.premise); setDetails(""); setSelected(null); }).catch(e => setError(e.message)); }} onResume={() => { void request("stories/" + story.id + "/resume", {}).catch((e) => setError(e.message)); }} /> : <p role="status" className="p-8 text-sm text-muted-foreground">{t.loading}</p> :
+        {selected ? story ? story.tuning && story.tuning !== "production" ? <StoryTune key={story.id} story={story} actors={actors} onUpdated={setStory} /> : <StoryView key={story.id} story={story} actors={actors} voice={voice} onUpdated={setStory} onRevise={() => { void revise(story); }} onContinue={() => { void request<Story>("stories/" + story.id + "/pause-for-edit", {}).then(() => { setContinuing(story.id); setCast(story.outline?.cast ?? []); setOutfits(migrateOutfitDefaults(story.scenes.at(-1)?.outfits ?? {}, actors)); setLength(story.length); setPremise(story.premise); setDetails(""); setSelected(null); }).catch(e => setError(e.message)); }} onResume={() => { void request("stories/" + story.id + "/resume", {}).catch((e) => setError(e.message)); }} /> : <p role="status" className="p-8 text-sm text-muted-foreground">{t.loading}</p> :
           <div className="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-12 md:px-10 md:py-20">
             <div className="flex flex-col gap-3"><h1 className="text-3xl font-semibold tracking-tight md:text-4xl">{continuing ? "续写" : t.newStory}</h1></div>
             <StoryImport cast={cast} onImported={doc => {setSelected(doc.id);setStory(doc);void readLibrary();}} />
@@ -271,7 +272,7 @@ function StoryPlayer({ story, actors, names, voice, jump, compact, editing, prev
   const lines = story.scenes.flatMap((scene) => scene.lines.filter((line) => line.speaker !== "narrator").map((line) => ({ ...line, scene })));
   const savedLine = lines[index];
   const line = editing && preview && preview.line.id === savedLine?.id ? {...preview.line, scene: savedLine.scene} : savedLine;
-  const voiceKey = savedLine ? JSON.stringify([savedLine.id, savedLine.ja, savedLine.emotion, savedLine.voice_style, savedLine.speakers, savedLine.audio_revision]) : "";
+  const voiceKey = savedLine ? JSON.stringify([savedLine.id, savedLine.ja, savedLine.emotion, savedLine.voice_style, savedLine.nichika_voice_style, savedLine.speakers, savedLine.audio_revision]) : "";
   useEffect(() => { if (line) onPosition(line.id); }, [line?.id, onPosition]);
   useEffect(() => { try { if (lines.length) localStorage.setItem("kaibun-position-" + story.id, String(Math.min(index, lines.length - 1))); } catch {} }, [index, story.id, lines.length]);
   useEffect(() => {
@@ -310,7 +311,7 @@ function StoryPlayer({ story, actors, names, voice, jump, compact, editing, prev
   const storyRef = useRef(story); storyRef.current = story;
   const audioFor = useCallback((lineId: string) => {
     const source = storyRef.current.scenes.flatMap(s => s.lines).find(l => l.id === lineId.split("~")[0]);
-    const key = JSON.stringify([lineId, source?.ja, source?.emotion, source?.voice_style, source?.audio_revision]);
+    const key = JSON.stringify([lineId, source?.ja, source?.emotion, source?.voice_style, source?.nichika_voice_style, source?.audio_revision]);
     const existing = cache.current.get(key);
     if (existing) return Promise.resolve(existing);
     const pending = requests.current.get(key);

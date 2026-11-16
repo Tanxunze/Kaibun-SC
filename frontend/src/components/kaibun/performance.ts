@@ -6,8 +6,12 @@ export function segmentAt(segments: Line["performance_segments"], progress: numb
 
 export function performancePose(line: Line, segment: PerformanceSegment | undefined, id: string, base = {mood: "calm", bodyVariant: 0} as {mood: string; bodyVariant: number; bodyMood?: string}) {
   const speaker = (line.speakers || [line.speaker]).includes(id);
-  const state = segment?.actor_states?.[id];
-  if (state) return {...base, mood: state.emotion || base.mood, bodyMood: state.body_mood || state.emotion || base.mood};
+  const state = {...line.actor_states?.[id]};
+  if (segment) for (const part of line.performance_segments || []) {
+    Object.assign(state,part.actor_states?.[id]);
+    if (part===segment) break;
+  }
+  if (Object.keys(state).length) return {...base, mood: state.emotion || base.mood, bodyMood: "body_mood" in state ? state.body_mood || undefined : base.bodyMood};
   if (segment && speaker) return {...base, mood: segment.emotion, bodyMood: segment.body_mood || segment.emotion};
   return base;
 }

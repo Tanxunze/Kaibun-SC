@@ -1,8 +1,8 @@
 const fs=require('node:fs/promises'), path=require('node:path'), http=require('node:http');
-const [root,assets,backgrounds,out]=process.argv.slice(2);
+const [root,assets,backgrounds,out,portraits]=process.argv.slice(2);
 const {chromium}=require(path.join(root,'frontend/node_modules/playwright'));
 const ts=require(path.join(root,'frontend/node_modules/typescript'));
-const roots={'/src/':path.join(root,'frontend/src'),'/vendor/':path.join(root,'frontend/public/vendor'),'/assets/':assets,'/backgrounds/':backgrounds};
+const roots={'/src/':path.join(root,'frontend/src'),'/vendor/':path.join(root,'frontend/public/vendor'),'/assets/':assets,'/backgrounds/':backgrounds,'/portraits/':portraits};
 const mime={'.js':'text/javascript','.json':'application/json','.atlas':'text/plain','.png':'image/png','.jpg':'image/jpeg'};
 const html=require('node:fs').readFileSync(path.join(__dirname,'video_stage.html'),'utf8');
 const server=http.createServer(async(req,res)=>{try{const url=decodeURIComponent(new URL(req.url,'http://localhost').pathname);if(url==='/'){res.setHeader('content-type','text/html');return res.end(html)}const pre=Object.keys(roots).find(p=>url.startsWith(p));if(!pre){res.writeHead(404);return res.end()}let file=path.resolve(roots[pre],url.slice(pre.length));if(!file.startsWith(roots[pre]+path.sep)){res.writeHead(404);return res.end()}if(pre==='/src/'){if(!file.endsWith('.ts'))file+='.ts';res.setHeader('content-type','text/javascript');return res.end(ts.transpileModule(await fs.readFile(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText)}res.setHeader('Cache-Control','public,max-age=86400');res.setHeader('content-type',mime[path.extname(file)]||'application/octet-stream');res.end(await fs.readFile(file))}catch{res.writeHead(404);res.end()}});

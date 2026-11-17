@@ -25,7 +25,10 @@ def snapshot(doc):
 
 
 def fingerprint(doc):
-    return hashlib.sha256(json.dumps(snapshot(doc), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    state = snapshot(doc)
+    if doc.get("guest_cast"):
+        state["guest_cast"] = doc["guest_cast"]
+    return hashlib.sha256(json.dumps(state, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
 def remember(doc):

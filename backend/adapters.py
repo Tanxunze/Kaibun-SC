@@ -144,7 +144,7 @@ class ProjectAdapter(ModelConnection):
             stand = None
             if outfit and (self.asset_root / "spine" / "idols" / outfit / "data.json").is_file():
                 stand = {"id": outfit, "url": f"/api/kaibun/stand/{outfit}/"}
-            result.append(dict(**identity(c),
+            result.append(dict(**identity(c), voice_id=c.voice_id,
                                retired_default_outfits=[oid for oid in AUTO_EXCLUDED if self.wardrobe.outfit(c.id, oid)],
                                avatar_url=f"/api/kaibun/characters/{c.id}/avatar",
                                background_url=f"/api/kaibun/characters/{c.id}/background" if c.background else None,
@@ -153,7 +153,7 @@ class ProjectAdapter(ModelConnection):
 
     def voice_signature(self, line):
         character = self.characters.get(line["speaker"])
-        voice = character.voice_id if character else os.environ.get("KAIBUN_PRODUCER_VOICE_ID", "")
+        voice = line.get("guest_voice") or (character.voice_id if character else os.environ.get("KAIBUN_PRODUCER_VOICE_ID", ""))
         if line["speaker"] == "fuyuko" and line.get("voice_style") == "idol":
             voice = os.environ.get("KAIBUN_FUYUKO_IDOL_VOICE_ID") or voice
         if line['speaker'] == 'nichika' and line.get('nichika_voice_style') == 'idol':

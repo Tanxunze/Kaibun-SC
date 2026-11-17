@@ -1,7 +1,6 @@
 """Prepare voice files and scene staging before a story becomes ready."""
 
 import asyncio
-import os
 
 from wardrobe import WardrobeError
 from backgrounds import BackgroundError
@@ -11,11 +10,27 @@ class ProductionError(RuntimeError):
     """Safe, locally written production failure shown to the story's owner."""
 
 
+def line_voices(line, doc, adapter):
+    targets = []
+    for cid in line.get("speakers") or [line["speaker"]]:
+        guest_voice = doc.get('guest_cast', {}).get(cid, {}).get('voice_id')
+        if guest_voice:
+            if not adapter.tts_key:
+                continue
+        elif not adapter.has_voice(cid):
+            continue
+        target = dict(line, speaker=cid)
+        if line.get('speakers'):
+            target['id'] += '~' + cid
+        if guest_voice:
+            target['guest_voice'] = guest_voice
+        targets.append(target)
+    return targets
+
+
 def voice_lines(doc, adapter):
-    return [dict(line, speaker=cid, id=line["id"] + "~" + cid) if line.get("speakers") else line
-            for scene in doc["scenes"] for line in scene["lines"]
-            for cid in (line.get("speakers") or [line["speaker"]])
-            if (adapter.has_voice(cid) if hasattr(adapter, 'has_voice') else cid in adapter.characters or (cid == "producer" and bool(os.environ.get("KAIBUN_PRODUCER_VOICE_ID"))))]
+    return [target for scene in doc["scenes"] for line in scene["lines"]
+            for target in line_voices(line, doc, adapter)]
 
 
 def cached_audio(store, adapter, story_id, line):

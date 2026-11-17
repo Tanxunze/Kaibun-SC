@@ -43,7 +43,7 @@ function slotAt(bank,index){
  canvas.addEventListener('webglcontextlost',()=>{failure='Export WebGL context was lost';});
  const slot={node,canvas,label,engine:null,gl:null,outfit:null,actor:null};slots.push(slot);return slot;
 }
-function shotKey(item){return JSON.stringify([item.background||'',item.actors.map(a=>[a.id,a.outfit||null,a.height||1000,a.name||''])]);}
+function shotKey(item){return JSON.stringify([item.background||'',item.actors.map(a=>[a.id,a.outfit||null,a.height||1000,a.name||'',a.portrait||''])]);}
 function subtitleLayout(text){
  if(layouts.has(text))return layouts.get(text);
  const measure=sub.cloneNode(false);measure.removeAttribute('id');const computed=getComputedStyle(sub);
@@ -95,7 +95,15 @@ async function prepareShot(item){
   used.add(slot);bank.slots.push(slot);bank.visible.push(actor.id);slot.actor=actor.id;bank.node.append(slot.node);
   slot.node.style.display='block';slot.node.style.width=innerWidth+'px';
   slot.canvas.style.display=actor.outfit?'block':'none';slot.label.style.display=actor.outfit?'none':'flex';
-  if(!actor.outfit){slot.label.textContent=actor.name||actor.id;slot.outfit=null;continue;}
+  if(!actor.outfit){
+   slot.label.textContent=actor.name||actor.id;
+   if(actor.portrait){
+    const image=new Image();image.src=actor.portrait;await image.decode();
+    image.style.cssText='height:100%;max-width:100%;object-fit:contain;object-position:bottom';
+    slot.label.replaceChildren(image);
+   }
+   slot.outfit=null;continue;
+  }
   if(!window.spine)throw Error('Spine runtime is missing; cannot export the configured stands');
   if(!slot.engine){slot.engine=new StandEngine(slot.canvas,window.spine,'waist');slot.gl=slot.canvas.getContext('webgl');}
   if(slot.outfit!==actor.outfit){await slot.engine.load({id:actor.outfit,url:'/assets/spine/idols/'+actor.outfit+'/'});slot.outfit=actor.outfit;}
@@ -120,6 +128,10 @@ function commitShot(bank,item){
  for(const [index,actor] of item.actors.entries()){
   const slot=bank.slots.find(s=>s.actor===actor.id);
   slot.node.style.width=innerWidth+'px';slot.node.style.left=((index+.5)*innerWidth/item.actors.length-innerWidth/2)+'px';
+  if(actor.portrait){
+   const width=innerWidth*Math.min(.5,1/item.actors.length);
+   slot.label.style.width=width+'px';slot.label.style.margin='0 auto';
+  }else{slot.label.style.width='';slot.label.style.margin='';}
   if(slot.engine)slot.engine.groundFrame={height,bottom};
  }
  direct(bank,item);

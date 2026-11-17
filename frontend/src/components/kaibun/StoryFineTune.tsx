@@ -14,7 +14,9 @@ export function StoryFineTune({story, scene, line, actors, names, onPreview, onU
   story: Story; scene: Scene; line: Line; actors: Actor[]; names: Record<string,string>;
   onPreview: (preview: {line: Line; segment: number}) => void; onUpdated: (story: Story) => void; onDeleted: (story: Story) => void;
 }) {
-  const [draft, setDraft] = useState<Line>(() => ({...line, screen_cast: line.screen_cast ?? stageCast(scene.lines, scene.lines.indexOf(line), story.outline?.cast || [])}));
+  const guests = story.guest_actors ?? [];
+  const cast = [...(story.outline?.cast ?? []), ...guests.map(g => g.id)];
+  const [draft, setDraft] = useState<Line>(() => ({...line, screen_cast: line.screen_cast ?? stageCast(scene.lines, scene.lines.indexOf(line), cast)}));
   const [segments, setSegments] = useState<PerformanceSegment[]>(() => line.performance_segments?.length && line.performance_segments.every(s => typeof s.ja === "string") ? structuredClone(line.performance_segments) : [{ja:line.ja, zh:line.zh, emotion:line.emotion, body_mood:line.body_mood, actor_states:structuredClone(line.actor_states || {})}]);
   const [active, setActive] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -22,7 +24,7 @@ export function StoryFineTune({story, scene, line, actors, names, onPreview, onU
   const token = useRef(crypto.randomUUID());
   const editBase = useRef(story.base_fingerprint);
   const cursors = useRef<Record<string, number>>({});
-  const cast = story.outline?.cast || [];
+
   const order = draft.actor_order || cast;
   const speakers = draft.speakers?.length ? draft.speakers : [draft.speaker];
   const inherited = stagePoses(scene.lines, scene.lines.findIndex(l=>l.id===line.id),cast);
@@ -52,8 +54,8 @@ export function StoryFineTune({story, scene, line, actors, names, onPreview, onU
     finally { setBusy(false); }
   }
   return <div className="flex flex-col gap-4 rounded-lg border p-4">
-    <fieldset className="flex flex-wrap gap-2"><legend>出场人物与站位</legend><StoryCastOrder actors={actors.filter(a => cast.includes(a.id))} order={order} selected={draft.screen_cast || []} onOrder={actor_order => setDraft(v => ({...v,actor_order}))} onSelected={screen_cast => setDraft(v => ({...v,screen_cast}))} /></fieldset>
-    <fieldset className="flex flex-wrap gap-2"><legend>发言配音</legend>{[...cast,"producer"].map(id => <label key={id} className="flex items-center gap-1 rounded-lg border px-3 py-2 text-sm"><input type="checkbox" checked={speakers.includes(id)} onChange={e => {
+    <fieldset className="flex flex-wrap gap-2"><legend>出场人物与站位</legend><StoryCastOrder actors={[...actors, ...guests].filter(a => cast.includes(a.id))} order={order} selected={draft.screen_cast || []} onOrder={actor_order => setDraft(v => ({...v,actor_order}))} onSelected={screen_cast => setDraft(v => ({...v,screen_cast}))} /></fieldset>
+    <fieldset className="flex flex-wrap gap-2"><legend>发言配音</legend>{[...(story.outline?.cast ?? []), ...(story.outline?.guests ?? []).map(g => g.id), "producer"].map(id => <label key={id} className="flex items-center gap-1 rounded-lg border px-3 py-2 text-sm"><input type="checkbox" checked={speakers.includes(id)} onChange={e => {
       const people = e.target.checked ? id === "producer" ? [id] : [...speakers.filter(s => s !== "producer"),id] : speakers.filter(s => s !== id);
       if (people.length) setDraft(v => ({...v,speaker:people[0],speakers:people.length > 1 ? people : undefined}));
     }} />{names[id]}</label>)}</fieldset>

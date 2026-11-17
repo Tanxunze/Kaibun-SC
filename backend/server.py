@@ -26,7 +26,8 @@ from adapters import ProjectAdapter  # noqa: E402 - local read-only adapter requ
 from author import Author  # noqa: E402
 from store import StoryStore  # noqa: E402
 from performance import normalize_segments, recover_split_audio
-from production import cached_audio, voice_lines  # noqa: E402
+from guest_cast import guest_actors, install_guest_routes
+from production import cached_audio, voice_lines, line_voices  # noqa: E402
 from video_export import VideoExport  # noqa: E402
 from voice_errors import voice_failure
 
@@ -149,7 +150,10 @@ def create_app(store, adapter, api_token=None):
             targets = voice_lines(doc, adapter)
             done = sum(bool(cached_audio(store, adapter, doc['id'], line)) for line in targets)
             result['production'].update(voices_done=done, voices_total=len(targets))
+        result['guest_actors'] = guest_actors(doc, adapter)
         for scene in result["scenes"]:
+            for line in scene['lines']:
+                line['voice_tracks'] = [target['id'] for target in line_voices(line, doc, adapter)]
             scene["wardrobe"] = {cid: outfit for cid, oid in scene.get("outfits", {}).items()
                                  if (outfit := adapter.outfit(cid, oid)) is not None}
             scene["wardrobe_changes"] = {
@@ -327,6 +331,7 @@ def create_app(store, adapter, api_token=None):
     async def get_story(id: str):
         return presentation(story_or_404(id))
 
+    install_guest_routes(app, store, adapter, author, exports, story_or_404, presentation)
     from revisions import install_revision_routes
     install_revision_routes(app, store, adapter, author, exports, story_or_404, presentation, require_writing_model)
     from voice_jobs import install_voice_routes
@@ -377,50 +382,52 @@ def create_app(store, adapter, api_token=None):
                 line.pop('body_mood', None)
             else:
                 line['body_mood'] = body.body_mood
+        stage_ids = [*doc['outline']['cast'], *(g['id'] for g in guest_actors(doc, adapter))]
+        guest_ids = {g['id'] for g in doc['outline']['guests']}
         if body.actor_order is not None:
-            if any(cid not in doc['outline']['cast'] for cid in body.actor_order):
+            if any(cid not in stage_ids for cid in body.actor_order):
                 raise HTTPException(422, '角色排序无效')
             line['actor_order'] = list(dict.fromkeys(body.actor_order))
         if body.screen_cast is not None:
-            if len(body.screen_cast) > 7 or any(cid not in doc['outline']['cast'] for cid in body.screen_cast):
+            if len(body.screen_cast) > 7 or any(cid not in stage_ids for cid in body.screen_cast):
                 raise HTTPException(422, '请选择本故事内的至多七位角色')
             line['screen_cast'] = list(dict.fromkeys(body.screen_cast))
         if body.onstage is not None:
-            if any(cid not in adapter.characters for cid in body.onstage):
+            if any(cid not in stage_ids and cid not in adapter.characters for cid in body.onstage):
                 raise HTTPException(422, '出场人物包含无效角色')
             line['onstage'] = list(dict.fromkeys(body.onstage))
         if body.actor_states is not None:
             states = {}
             for cid, state in body.actor_states.items():
-                if cid not in adapter.characters or not isinstance(state, dict):
+                if cid not in stage_ids and cid not in adapter.characters or not isinstance(state, dict):
                     raise HTTPException(422, '角色动作设置无效')
                 states[cid] = {key: value for key, value in state.items() if key in ('emotion', 'body_mood') and (value in ('calm', 'happy', 'shy', 'surprised', 'sad', 'angry', 'thinking') or key == 'body_mood' and value is None)}
             line['actor_states'] = states
         if body.performance_segments is not None:
             try:
-                line['performance_segments'] = normalize_segments(body.performance_segments, line, doc['outline']['cast'])
+                line['performance_segments'] = normalize_segments(body.performance_segments, line, stage_ids)
                 line.pop('performance_invalidated', None)
             except ValueError as error:
                 raise HTTPException(422, str(error)) from None
         if body.speakers is not None:
             people = list(dict.fromkeys(body.speakers))
-            allowed = set(doc['outline']['cast']) | {'producer'}
+            allowed = set(stage_ids) | guest_ids | {'producer'}
             if not people or len(people) > 7 or any(cid not in allowed for cid in people):
                 raise HTTPException(422, '请选择1至7位本篇发言人物')
             line['speaker'] = people[0]
             if len(people) > 1:
-                if 'producer' in people: raise HTTPException(422, '多人同声请选择偶像')
+                if 'producer' in people: raise HTTPException(422, '多人同声请选择偶像或配角')
                 line['speakers'] = people
                 selected = list(line.get('screen_cast') or [])
                 line['screen_cast'] = list(dict.fromkeys(people + selected))[:7]
             else:
                 line.pop('speakers', None)
-        targets = [dict(line, speaker=cid, id=line['id'] + '~' + cid) if line.get('speakers') else line for cid in (line.get('speakers') or [line['speaker']]) if cid in adapter.characters or (cid == 'producer' and os.environ.get('KAIBUN_PRODUCER_VOICE_ID'))]
         # Commit the edit before voice generation: a provider failure must not lose it.
         if body.voice_style is not None and line['speaker'] == 'fuyuko':
             line['voice_style'] = body.voice_style
         if body.nichika_voice_style is not None and 'nichika' in (line.get('speakers') or [line['speaker']]):
             line['nichika_voice_style'] = body.nichika_voice_style
+        targets = line_voices(line, doc, adapter)
         current_voice = [(target['id'], adapter.voice_signature(target)[0]) for target in targets]
         if previous_voice != current_voice:
             line['audio_revision'] = uuid.uuid4().hex
@@ -514,8 +521,8 @@ def create_app(store, adapter, api_token=None):
                 raise HTTPException(422, "本幕已达到台词数量上限")
             people = list(dict.fromkeys(body.speakers)) or ['producer']
             allowed = {*doc['outline']['cast'], 'producer', *(g['id'] for g in doc['outline']['guests'])}
-            if any(cid not in allowed for cid in people) or len(people) > 7 or (len(people) > 1 and any(cid not in doc['outline']['cast'] for cid in people)):
-                raise HTTPException(422, '多人同声请选择2至7位本篇偶像')
+            if any(cid not in allowed for cid in people) or len(people) > 7 or (len(people) > 1 and 'producer' in people):
+                raise HTTPException(422, '多人同声请选择本篇的 2 至 7 位偶像或配角')
             new_line = dict(id=f"{index}-n{uuid.uuid4().hex[:16]}", speaker=people[0], ja="……", zh="……", emotion="calm", kind="dialogue")
             if len(people) > 1: new_line['speakers'] = people
             lines.insert(pos + 1, new_line)
@@ -537,8 +544,8 @@ def create_app(store, adapter, api_token=None):
         if not body.zh.strip():
             raise HTTPException(422, "请输入中文台词")
         previous_line = deepcopy(line)
+        allowed = {*doc["outline"]["cast"], "producer", *(guest["id"] for guest in doc["outline"]["guests"])}
         if body.speaker is not None:
-            allowed = {*doc["outline"]["cast"], "producer", *(guest["id"] for guest in doc["outline"]["guests"])}
             if body.speaker not in allowed:
                 raise HTTPException(422, "请选择本篇人物")
             if body.speaker != line["speaker"]:
@@ -547,8 +554,8 @@ def create_app(store, adapter, api_token=None):
             line["speaker"] = body.speaker
         if body.speakers is not None:
             people = list(dict.fromkeys(body.speakers))
-            if len(people) < 2 or len(people) > 7 or any(cid not in doc['outline']['cast'] for cid in people):
-                raise HTTPException(422, "多人同声请选择2至7位本篇偶像")
+            if len(people) < 2 or len(people) > 7 or any(cid not in allowed or cid == 'producer' for cid in people):
+                raise HTTPException(422, "多人同声请选择本篇的 2 至 7 位偶像或配角")
             line['speakers'] = people
             line['speaker'] = people[0]
         if body.ja is not None:
@@ -674,7 +681,7 @@ def create_app(store, adapter, api_token=None):
             source = story_or_404(id)
         title = source.get("title", source["premise"]) + "·改"
         doc = store.create(source["premise"], source.get("requested_cast", []), source["length"], source.get("details", ""), source.get("requested_outfits", {}), source.get("outfit_mode", "story"))
-        doc.update(title=title, custom_title=title, outline=deepcopy(source["outline"]), scenes=deepcopy(source["scenes"]),
+        doc.update(title=title, custom_title=title, guest_cast=deepcopy(source.get("guest_cast", {})), outline=deepcopy(source["outline"]), scenes=deepcopy(source["scenes"]),
                    story_memory=source.get("story_memory", ""), tuning="script", status="tuning", phase="调整剧本", revision_of=id, production=None, production_version=None, revision_epoch=0)
         store.save(doc)
         for target in voice_lines(doc, adapter):
@@ -788,7 +795,7 @@ def create_app(store, adapter, api_token=None):
     async def voice(id: str, line_id: str):
         doc = story_or_404(id)
         line = next((line for line in voice_lines(doc, adapter) if line["id"] == line_id), None)
-        if not line or (line["speaker"] not in adapter.characters and not (line["speaker"] == "producer" and os.environ.get("KAIBUN_PRODUCER_VOICE_ID"))):
+        if not line:
             raise HTTPException(404, "这句不需要配音")
         path = cached_audio(store, adapter, id, line)
         if path is None:

@@ -12,6 +12,7 @@ import { SceneOutfits } from "./SceneOutfits";
 import { StoryBackgrounds } from "./StoryBackgrounds";
 import { StoryVoiceControls } from "./StoryVoiceControls";
 import { StoryImport } from "./StoryImport";
+import { GuestCastingPanel } from "./GuestCastingPanel";
 import { StoryTune } from "./StoryTune";
 import { scenePresentation } from "./presentation";
 
@@ -211,6 +212,7 @@ function StoryView({ story, actors, voice, onResume, onUpdated, onContinue, onRe
   for (const guest of story.outline?.guests ?? []) names[guest.id] = guest.name;
   return <div className={cn("mx-auto flex max-w-7xl flex-col gap-5 px-4 py-6 md:px-8 md:py-8", script && watching && "h-dvh overflow-hidden")}>
     <div className="flex flex-wrap items-start justify-between gap-4"><div className="flex min-w-0 flex-1 flex-col gap-2"><p className="text-meta text-muted-foreground">{t.title} · {t.status[story.status]}</p><h1 className="text-2xl font-semibold tracking-tight">{story.title || story.premise}</h1></div><Button variant="ghost" onClick={() => { if (script) setScript(false); else openScript(false); }}>{script ? t.closeScript : t.read}</Button></div>
+    <GuestCastingPanel story={story} actors={actors} onUpdated={onUpdated} />
     {unfinished && <div role="status" className="flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3 text-sm">{story.status === "generating" || story.status === "preparing" || story.status === "queued" ? <Spinner /> : null}<span className="flex-1">{story.phase}{story.outline ? " · " + t.scene(story.scenes.length, story.outline.scenes.length) : ""}</span>{story.status === "generating" || story.status === "preparing" || story.status === "queued" ? <Button variant="outline" onClick={() => { void request("stories/" + story.id + "/stop", {}).catch((e) => setActionError(e.message)); }}>停止</Button> : null}{story.status === "failed" || story.status === "interrupted" ? <Button variant="outline" onClick={onResume}>{t.resume}</Button> : null}</div>}
     {story.error && <p role="alert" className="text-sm text-muted-foreground">{story.error}</p>}
     <div ref={playerTop} className={cn(script && watching && "sticky top-0 z-30 bg-background")} />{actionError && <p role="alert">{actionError}</p>}{story.scenes.length ? <div className={cn(script && watching && "sticky top-0 z-30 bg-background")} >{!watching ? <div className="flex min-h-72 flex-col items-center justify-center gap-5 rounded-2xl bg-muted/50"><div className="flex -space-x-2">{(story.outline?.cast ?? []).map((id) => { const actor = actors.find((a) => a.id === id); return actor ? <MarkedAvatar key={id} name={actor.name} src={actor.avatar_url} size="list" /> : null; })}</div><p className="text-sm text-muted-foreground">{t.scene(story.scenes.length, story.outline?.scenes.length ?? 0)}</p><Button size="lg" onClick={() => setWatching(true)}><StoryPlayIcon />{unfinished ? t.watchFirst : t.watch}</Button></div> : <StoryPlayer story={story} actors={actors} names={names} voice={voice} jump={jump} compact={script} editing={fine} onUpdated={onUpdated} preview={fine ? preview : null} onPosition={setCurrentLine} />}</div> : <div className="flex min-h-72 items-center justify-center rounded-2xl bg-muted/50"><StoryIcon className="size-10 text-muted-foreground" /></div>}
@@ -354,9 +356,9 @@ function StoryPlayer({ story, actors, names, voice, jump, compact, editing, prev
     setNotice(""); setSpeaking(false); setSegmentIndex(0);
     let segmentTimer: ReturnType<typeof setInterval> | undefined;
     const subtitleTimer = () => { const duration = line.kind === "thought" ? Math.min(20000, Math.max(5000, line.zh.length * 150)) : Math.min(12000, Math.max(3000, line.zh.length * 115)); const started = Date.now(); clearInterval(segmentTimer); segmentTimer = setInterval(() => setSegmentIndex(segmentAt(line.performance_segments, (Date.now() - started) / duration)), 100); timer = setTimeout(() => { if (active) next(); }, line.kind === "thought" ? Math.min(20000, Math.max(5000, line.zh.length * 150)) : Math.min(12000, Math.max(3000, line.zh.length * 115))); };
-    if (!sound || !(line.speaker === "producer" || actors.some((a) => a.id === line.speaker))) subtitleTimer();
+    const ids = line.voice_tracks ?? [];
+    if (!sound || !ids.length) subtitleTimer();
     else {
-      const ids = line.speakers?.length ? line.speakers.map(id => line.id + "~" + id) : [line.id];
       Promise.all(ids.map(audioFor)).then((urls) => {
         if (!active) return;
         audio = urls.map(url => new Audio(url));
@@ -369,16 +371,17 @@ function StoryPlayer({ story, actors, names, voice, jump, compact, editing, prev
         }
         return Promise.all(audio.map(player => player.play()));
       }).then(() => {
-        if (active && nextLine && !nextLine.speakers?.length && actors.some((a) => a.id === nextLine.speaker)) void audioFor(nextLine.id).catch(() => {});
+        if (active && nextLine?.voice_tracks?.length === 1) void audioFor(nextLine.voice_tracks[0]).catch(() => {});
       }).catch(() => { if (active) { setSpeaking(false); setNotice(t.voiceFailed); subtitleTimer(); } });
     }
     return () => { active = false; clearTimeout(timer); clearInterval(segmentTimer); audio.forEach(player => player.pause()); setSpeaking(false); };
   }, [voiceKey, playing, sound, audioFor, next, transitioning]);
-  const cast = story.outline?.cast ?? [];
+  const guests = story.guest_actors ?? [];
+  const cast = [...(story.outline?.cast ?? []), ...guests.map(g => g.id)];
   const focused = orderedStageCast(line?.screen_cast ? line.screen_cast : line?.speakers?.length ? cast.filter(id => line.speakers?.includes(id)).slice(0, 7) : line ? stageCast(line.scene.lines, line.scene.lines.findIndex(l => l.id === line.id), cast, 5) : [], line?.actor_order);
   const passage = line ? speechPassage(line.scene.lines, line.scene.lines.findIndex(l => l.id === line.id)) : null;
   const presentation = line ? scenePresentation(line.scene, line.id) : null;
-  const sceneActors = actors.map(actor => {
+  const sceneActors = [...actors, ...guests].map(actor => {
     const costume = presentation?.wardrobe[actor.id];
     return costume ? { ...actor, stand: costume, stand_bounds: costume.bounds ?? actor.stand_bounds } : actor;
   });

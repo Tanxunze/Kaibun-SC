@@ -15,7 +15,8 @@ import uuid
 from array import array
 from pathlib import Path
 
-from production import cached_audio, voice_lines, Production
+from guest_cast import guest_actors
+from production import cached_audio, voice_lines, line_voices, Production
 
 
 def ffmpeg_path():
@@ -135,6 +136,8 @@ class VideoExport:
             stat = path.stat()
             voices.append((line['id'], path.name, stat.st_size, stat.st_mtime_ns))
         data = {'version': 25, 'scenes': doc['scenes'], 'outline': doc.get('outline'), 'voices': voices}
+        if doc.get("guest_cast"):
+            data["guest_cast"] = doc["guest_cast"]
         return hashlib.sha256(json.dumps(data, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
     def output_path(self, doc):
@@ -199,12 +202,7 @@ class VideoExport:
                     if line.get('speaker') == 'narrator':
                         continue
                     audios = []
-                    for cid in line.get('speakers') or [line.get('speaker')]:
-                        if hasattr(self.adapter, 'has_voice') and not self.adapter.has_voice(cid):
-                            continue
-                        if cid not in self.adapter.characters and not (cid == "producer" and os.environ.get("KAIBUN_PRODUCER_VOICE_ID")):
-                            continue
-                        voice = dict(line, speaker=cid, id=line['id'] + '~' + cid) if line.get('speakers') else line
+                    for voice in line_voices(line, doc, self.adapter):
                         audio = cached_audio(self.store, self.adapter, sid, voice)
                         if not audio:
                             raise ValueError('有配音尚未准备好，请先继续完成这篇故事的语音')
@@ -265,7 +263,8 @@ class VideoExport:
         if not node:
             raise ValueError('视频导出需要 Node.js，请先安装后重试')
         flags = 0x08000000 if os.name == 'nt' else 0
-        cast = (doc.get('outline') or {}).get('cast', [])
+        guests = {g['id']: g for g in guest_actors(doc, self.adapter)}
+        cast = [*(doc.get('outline') or {}).get('cast', []), *guests]
         items, sounds = [], []
         active_scene = None
         for scene, line, audio_files in entries:
@@ -295,14 +294,21 @@ class VideoExport:
             shot = cast_for(scene['lines'], line_index, cast)
             actors = []
             for cid in shot:
-                character = self.adapter.characters.get(cid)
-                oid = outfits.get(cid) or getattr(character, 'default_outfit', None)
+                guest = guests.get(cid)
+                if guest and guest['portrait']:
+                    actors.append(dict(id=cid, name=guest['name'], portrait='/portraits/' + guest['portrait'] + '.png',
+                                       outfit=None, speaking=False, isSpeaker=cid in (line.get('speakers') or [line['speaker']]),
+                                       mood='calm', variant=0, bodyMood=None))
+                    continue
+                owner = doc['guest_cast'][cid]['outfit_owner'] if guest else cid
+                character = self.adapter.characters.get(owner)
+                oid = guest['stand']['id'] if guest else outfits.get(cid) or getattr(character, 'default_outfit', None)
                 if not oid or oid not in self.adapter.wardrobe.entries:
                     actors.append(dict(id=cid, name=getattr(character, 'short_name', None) or getattr(character, 'name', cid), outfit=None, speaking=False, isSpeaker=cid == line.get('speaker'), mood='calm', variant=0, bodyMood=None))
                     continue
                 speaking = (cid == line.get('speaker') or cid in (line.get('speakers') or [])) and bool(length) and line.get('kind') != 'thought'
                 mood, variant, body_mood = pose_for(scene['lines'], line_index, cast, cid)
-                actors.append(dict(id=cid, outfit=oid, height=((self.adapter.outfit(cid, oid) or {}).get("bounds") or {}).get("height", 1000), speaking=speaking, isSpeaker=(cid in (line.get('speakers') or [line.get('speaker')])), mood=mood, variant=variant, bodyMood=body_mood))
+                actors.append(dict(id=cid, outfit=oid, height=((self.adapter.outfit(owner, oid) or {}).get("bounds") or {}).get("height", 1000), speaking=speaking, isSpeaker=(cid in (line.get('speakers') or [line.get('speaker')])), mood=mood, variant=variant, bodyMood=body_mood))
             char = self.adapter.characters.get(line.get('speaker'))
             color = getattr(char, 'color', None) or '#324d74'
             if not re.fullmatch(r'#[0-9a-fA-F]{6}', color): color = '#324d74'
@@ -315,7 +321,7 @@ class VideoExport:
         with nullcontext(str(folder)) as folder:
             temp = Path(folder)
             if not ((temp / 'record.webm').is_file() and (temp / 'offsets.json').is_file()):
-                proc = subprocess.Popen([node, str(root / 'backend' / 'video_record.cjs'), str(root), str(self.adapter.asset_root.resolve()), str((self.adapter.backgrounds.directory / 'originals').resolve()), str(temp)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=flags)
+                proc = subprocess.Popen([node, str(root / 'backend' / 'video_record.cjs'), str(root), str(self.adapter.asset_root.resolve()), str((self.adapter.backgrounds.directory / 'originals').resolve()), str(temp), str((self.store.directory / "guest-portraits").resolve())], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=flags)
                 assert proc.stdin and proc.stdout and proc.stderr
                 proc.stdin.write(json.dumps(items, ensure_ascii=False).encode('utf-8')); proc.stdin.close()
                 def cancel_process():

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { GuestCastingPanel } from "./GuestCastingPanel";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { request, type Actor, type Story } from "./api";
@@ -45,6 +46,7 @@ export function StoryTune({ story, actors, onUpdated }: { story: Story; actors: 
   const fields: Record<string,string> = {ja:"日文",zh:"中文",speaker:"说话人",speakers:"多人配音",emotion:"情绪",kind:"对白／心声",voice_style:"声线",order:"顺序",onstage:"现场人物",focus:"镜头人物",screen_cast:"出场人物",actor_order:"站位",actor_states:"人物演出",body_mood:"动作",performance_segments:"句内区间"};
   return <div className="mx-auto flex max-w-5xl flex-col gap-5 px-5 py-8">
     <h1 className="text-2xl font-semibold">{story.title || story.premise}</h1>
+    <GuestCastingPanel story={story} actors={actors} onUpdated={onUpdated} />
     <aside className="flex flex-col gap-3 rounded-lg border bg-background p-4"><p role="status" className="text-sm">{story.revision_progress?.message || story.phase}</p>
       {story.revision_changes?.map(group => <details key={group.scene} open><summary>第{group.scene}幕 · {group.changes.length}处变化</summary>{group.changes.map(change => <div key={change.id} className="border-t py-2 text-sm"><p>变化：{change.fields?.map(f => fields[f] || f).join("、") || "新增／删除"}</p><p>原：{change.before_ja}　{change.before || "（新增）"}</p><p>改：{change.after_ja}　{change.after || "（删除）"}</p>{change.voice_changed && <p>需要检查或补全配音</p>}{change.performance_reset && <p>文字改变，原区间已归档；暂用第一区间演出，请重新划分。</p>}</div>)}</details>)}
       {proposal && story.revision_progress?.status === "preview" && <div className="flex flex-col gap-2"><p>模型结果尚未应用。可以应用全部，或只应用勾选的幕；未选中的建议会放弃。</p>{proposal.completed.map(i => <label key={i}><input type="checkbox" checked={accepted.includes(i)} onChange={e => setAccepted(v => e.target.checked ? [...v,i] : v.filter(n => n !== i))} />第{i+1}幕</label>)}<div className="flex flex-wrap gap-2"><Button disabled={busy} onClick={() => void call("tune-apply",{proposal_id:proposal.id}).then(()=>setAccepted([])).catch(()=>{})}>应用全部修改</Button>{!proposal.outline && <Button variant="outline" disabled={busy || !accepted.length} onClick={() => void call("tune-apply",{proposal_id:proposal.id,scenes:accepted}).then(()=>setAccepted([])).catch(()=>{})}>应用选中的幕</Button>}</div>{proposal.outline && <pre className="whitespace-pre-wrap text-sm">{proposal.outline.direction}{"\n"}{proposal.outline.scenes.map((s,i) => `${i+1}. ${s.place}：${s.direction}`).join("\n")}</pre>}</div>}

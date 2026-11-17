@@ -143,6 +143,8 @@ macOS/Linux 用户使用相同的 Git 和依赖更新命令，然后在 `fronten
 
 人物配置保留姓名、读音、简介、印象色等资料，并附带原配置中 29 位角色的 Fish Audio `voice_id`。只填自己的 `FISH_AUDIO_API_KEY` 即可尝试调用；音色 ID 是服务上的引用标识，不是 API 密钥，也不包含声音模型或录音。模型可能被删除、变为私有或限制调用，遇到不可用时更换为自己有权使用的音色。制作人音色可用 `KAIBUN_PRODUCER_VOICE_ID` 配置；冬优子的额外偶像声线可用 `KAIBUN_FUYUKO_IDOL_VOICE_ID` 配置，不填则沿用角色音色。
 
+导入剧本后，在「配角音色与立绘」选择本篇配角。音色可选已有角色或填写 Fish 音色 ID；外观可选本地衣装，也可上传 PNG、JPEG 或 WebP 静态立绘。透明 PNG 可保留背景透明。保存设置后，新剧本在「完成并准备演出」时生成配音，已有作品可用「补齐缺失语音」。网页播放和视频导出使用相同的配角设置。
+
 人物资料在 `characters/sheets/`；创作规则在 `backend/CREATIVE_GUIDE.md`，人物补充在 `backend/character_notes.json`。这些是可修改的同人创作资料，不是官方剧情库，也不保证生成内容符合原作。
 
 需要头像时，在对应人物配置中增加相对于人物配置文件的路径，例如 `avatar = "avatars/mano.jpg"`，并自行放入你有权使用的图片。

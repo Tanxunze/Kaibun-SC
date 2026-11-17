@@ -53,6 +53,7 @@ export function KaibunPage() {
   const [length, setLength] = useState<StoryLength>("short");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [hasModel, setHasModel] = useState<boolean | null>(null);
   const [voice, setVoice] = useState(false);
   const deleted = useRef(new Set<string>());
   const draftLoaded = useRef(false);
@@ -70,8 +71,8 @@ export function KaibunPage() {
   const readLibrary = useCallback(() => request<StoryBrief[]>("stories").then(items => { pruneDeletedStoryDrafts(items); setStories(items.filter(item => !deleted.current.has(item.id))); }), []);
   useEffect(() => {
     let active = true;
-    Promise.all([request<Actor[]>("characters"), request<StoryBrief[]>("stories"), request<{ voice: boolean }>("health")])
-      .then(([actors, stories, health]) => { if (active) { if (draftNeedsOutfitMigration.current) {setOutfits(current => migrateOutfitDefaults(current,actors));draftNeedsOutfitMigration.current=false;} setActors(actors); setStories(stories); setVoice(health.voice); pruneDeletedStoryDrafts(stories); } })
+    Promise.all([request<Actor[]>("characters"), request<StoryBrief[]>("stories"), request<{ voice: boolean; model: string | null }>("health")])
+      .then(([actors, stories, health]) => { if (active) { if (draftNeedsOutfitMigration.current) {setOutfits(current => migrateOutfitDefaults(current,actors));draftNeedsOutfitMigration.current=false;} setActors(actors); setStories(stories); setVoice(health.voice); setHasModel(Boolean(health.model)); pruneDeletedStoryDrafts(stories); } })
       .catch((e) => { if (active) setError(e.message); });
     return () => { active = false; };
   }, []);
@@ -148,7 +149,7 @@ export function KaibunPage() {
         {selected ? story ? story.tuning && story.tuning !== "production" ? <StoryTune key={story.id} story={story} actors={actors} onUpdated={setStory} /> : <StoryView key={story.id} story={story} actors={actors} voice={voice} onUpdated={setStory} onRevise={() => { void revise(story); }} onContinue={() => { void request<Story>("stories/" + story.id + "/pause-for-edit", {}).then(() => { setContinuing(story.id); setCast(story.outline?.cast ?? []); setOutfits(migrateOutfitDefaults(story.scenes.at(-1)?.outfits ?? {}, actors)); setLength(story.length); setPremise(story.premise); setDetails(""); setSelected(null); }).catch(e => setError(e.message)); }} onResume={() => { void request("stories/" + story.id + "/resume", {}).catch((e) => setError(e.message)); }} /> : <p role="status" className="p-8 text-sm text-muted-foreground">{t.loading}</p> :
           <div className="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-12 md:px-10 md:py-20">
             <div className="flex flex-col gap-3"><h1 className="text-3xl font-semibold tracking-tight md:text-4xl">{continuing ? "续写" : t.newStory}</h1></div>
-            <StoryImport cast={cast} onImported={doc => {setSelected(doc.id);setStory(doc);void readLibrary();}} />
+            <StoryImport expanded={hasModel === false} cast={cast} onImported={doc => {setSelected(doc.id);setStory(doc);void readLibrary();}} />
             <form className="flex flex-col gap-5" onSubmit={(event) => { event.preventDefault(); void create(); }}>
               <Textarea rows={4} value={premise} maxLength={2000} aria-label={t.placeholder} placeholder={t.placeholder} onChange={(e) => setPremise(e.target.value)} />
               <div className="flex flex-wrap items-center gap-2"><span className="mr-2 text-sm text-muted-foreground">{t.length}</span>{(["short", "standard", "half_hour", "hour_plus"] as const).map((value) => <Button type="button" variant={length === value ? "secondary" : "ghost"} key={value} aria-pressed={length === value} onClick={() => setLength(value)}>{t[value]}</Button>)}</div>
@@ -156,7 +157,8 @@ export function KaibunPage() {
               {cast.length > 0 && <StoryOutfits actors={actors} cast={cast} outfits={outfits} onChange={(id, value) => setOutfits(current => ({ ...current, [id]: value }))} />}
               <div className="flex flex-wrap items-center gap-2 text-sm"><span>服装安排</span><Button type="button" variant={outfitMode === "story" ? "secondary" : "ghost"} aria-pressed={outfitMode === "story"} onClick={() => setOutfitMode("story")}>随剧情换装</Button><Button type="button" variant={outfitMode === "fixed" ? "secondary" : "ghost"} aria-pressed={outfitMode === "fixed"} onClick={() => setOutfitMode("fixed")}>全篇固定</Button></div>
               <label className="flex flex-col gap-2 text-sm">{t.details}<Textarea rows={3} value={details} maxLength={12000} placeholder={t.detailsPlaceholder} onChange={event => setDetails(event.target.value)} /></label>
-              <div className="flex items-center gap-4 border-t pt-5"><Button type="submit" size="lg" disabled={busy || premise.trim().length < 2 || !actors.length}>{busy ? <Spinner /> : <StoryIcon />}{busy ? t.generating : continuing ? "开始续写" : t.generate}</Button><Button type="button" variant="outline" disabled={busy || premise.trim().length < 2 || !actors.length} onClick={() => { void create(true); }}>剧本精调</Button></div>
+              {hasModel === false && <p className="text-sm text-muted-foreground">导入自写剧本可直接开始。使用 AI 创作时，请在 .env 配置文字模型后重启。</p>}
+              <div className="flex items-center gap-4 border-t pt-5"><Button type="submit" size="lg" disabled={!hasModel || busy || premise.trim().length < 2 || !actors.length}>{busy ? <Spinner /> : <StoryIcon />}{busy ? t.generating : continuing ? "开始续写" : t.generate}</Button><Button type="button" variant="outline" disabled={!hasModel || busy || premise.trim().length < 2 || !actors.length} onClick={() => { void create(true); }}>剧本精调</Button></div>
             </form>
           </div>}
       </main>

@@ -19,8 +19,11 @@ def main():
     from support.characters import load_characters
     failures = 0
     try:
-        settings = LLMSettings.chat_from_env()
-        print('OK model configuration:', settings.protocol, settings.model)
+        settings = LLMSettings.optional_from_env("CHAT")
+        if settings:
+            print('OK model configuration:', settings.protocol, settings.model)
+        else:
+            print('OK local script import (optional writing model unconfigured)')
     except Exception:
         print('FAIL model configuration: check CHAT_LLM_BASE_URL/API_KEY/MODEL/PROTOCOL')
         failures += 1

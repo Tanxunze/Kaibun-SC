@@ -32,9 +32,9 @@ notepad .env
 
 macOS/Linux 等价命令是 `cp .env.example .env`，再用本机编辑器填写。
 
-## 3. 配置最小模型连接
+## 3. 配置可选文字模型
 
-填写：
+导入自写剧本、手动编辑与字幕播放可直接使用。使用 AI 创作或调整时填写：
 
 ```dotenv
 CHAT_LLM_PROTOCOL=chat-completions

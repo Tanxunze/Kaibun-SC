@@ -34,19 +34,16 @@ def story_voice_text(line, model):
     return spoken_by(voiced(f"[{line['emotion']}] {text}"), model)
 
 
-class BackgroundSelector:
-    """A separate, small configured model; scene selection never calls the dialogue model."""
-
-    def __init__(self, proxy):
-        settings = LLMSettings._from_env("KAIBUN_BACKGROUND", fallback="CHAT")
-        self.settings = replace(settings, model=os.environ.get("KAIBUN_BACKGROUND_LLM_MODEL") or settings.model,
-                                max_tokens=settings.max_tokens or 4096,
-                                reasoning_effort=settings.reasoning_effort or "low")
-        self.model = self.settings.model
-        self.client = open_client(proxy.proxy_for("chat_llm"), httpx.Timeout(180, connect=15))
-        self.llm = open_llm(self.settings, self.client)
+class ModelConnection:
+    def __init__(self, settings, proxy):
+        self.settings = settings
+        self.model = settings.model if settings else None
+        self.client = open_client(proxy.proxy_for("chat_llm"), httpx.Timeout(180, connect=15)) if settings else None
+        self.llm = open_llm(settings, self.client) if settings else None
 
     async def complete(self, system, user):
+        if self.llm is None:
+            raise RuntimeError("请在 .env 配置模型并重启后再使用此功能")
         chunks = []
         stream = self.llm.stream([ChatMessage("system", system), ChatMessage("user", user)])
         try:
@@ -61,7 +58,8 @@ class BackgroundSelector:
         return await complete_with_images(self, system, user, images)
 
     async def close(self):
-        await self.llm.aclose()
+        if self.llm:
+            await self.llm.aclose()
 
 class WardrobeAdapter:
     """Use the configured asset selector while retaining the project's local catalog."""
@@ -80,13 +78,10 @@ class WardrobeAdapter:
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class ProjectAdapter:
+class ProjectAdapter(ModelConnection):
     def __init__(self):
-        self.settings = LLMSettings.chat_from_env()
-        self.model = self.settings.model
         self.proxy = proxy_from_env()
-        self.client = open_client(self.proxy.proxy_for("chat_llm"), httpx.Timeout(180, connect=15))
-        self.llm = open_llm(self.settings, self.client)
+        super().__init__(LLMSettings.optional_from_env("CHAT"), self.proxy)
         self.characters = load_characters(characters_path_from_env())
         self.characters = {cid: replace(character, default_outfit=DAILY_DEFAULTS[cid]) if cid in DAILY_DEFAULTS and character.default_outfit in AUTO_EXCLUDED else character for cid, character in self.characters.items()}
         self.asset_root = project_path(os.environ.get("KAIBUN_ASSET_ROOT") or 'assets')
@@ -110,7 +105,11 @@ class ProjectAdapter:
         self.dictionary = pronunciation_dictionary(self.readings)
         self.tts_model = fish_audio_model_from_env()
         self.tts_key = os.environ.get("FISH_AUDIO_API_KEY", "")
-        self.background_selector = BackgroundSelector(self.proxy)
+        settings = LLMSettings.optional_from_env("KAIBUN_BACKGROUND", fallback="CHAT")
+        if settings:
+            settings = replace(settings, max_tokens=settings.max_tokens or 4096,
+                               reasoning_effort=settings.reasoning_effort or "low")
+        self.background_selector = ModelConnection(settings, self.proxy)
         self.wardrobe = Wardrobe(WardrobeAdapter(self, self.background_selector), data_root() / 'wardrobe')
         self.backgrounds = Backgrounds(self.background_selector, data_root() / 'backgrounds')
 
@@ -119,20 +118,6 @@ class ProjectAdapter:
         voice = getattr(character, 'voice_id', '') if character else (
             os.environ.get('KAIBUN_PRODUCER_VOICE_ID') if cid == 'producer' else '')
         return bool(self.tts_key and voice)
-
-    async def complete(self, system, user):
-        chunks = []
-        stream = self.llm.stream([ChatMessage("system", system), ChatMessage("user", user)])
-        try:
-            async for item in stream:
-                if isinstance(item, str):
-                    chunks.append(item)
-        finally:
-            await stream.aclose()
-        return "".join(chunks)
-
-    async def complete_with_images(self, system, user, images):
-        return await complete_with_images(self, system, user, images)
 
     def outfits(self, cid):
         return self.wardrobe.outfits(cid)
@@ -224,4 +209,4 @@ class ProjectAdapter:
     async def close(self):
         await self.wardrobe.close()
         await self.background_selector.close()
-        await self.llm.aclose()
+        await super().close()

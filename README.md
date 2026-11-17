@@ -36,7 +36,7 @@ Kaibun 是从 [Eidolon-SC](https://github.com/Sallyn0225/eidolon-sc) 提取、�
 ## 快速开始
 
 1. 下载本仓库到任意目录，或执行 `git clone https://github.com/qwq13243/Kaibun-SC.git` 后进入 `Kaibun-SC` 目录。
-2. 将根目录 `.env.example` 复制为 `.env`，填写 `CHAT_LLM_BASE_URL`、`CHAT_LLM_API_KEY`、`CHAT_LLM_MODEL`。按服务选择 `CHAT_LLM_PROTOCOL`；接口地址一般包含服务要求的 `/v1` 前缀。
+2. 将根目录 `.env.example` 复制为 `.env`。自写剧本可直接启动，在页面选择“导入现有剧本”。使用 AI 创作时再填写 `CHAT_LLM_BASE_URL`、`CHAT_LLM_API_KEY`、`CHAT_LLM_MODEL`。按服务选择 `CHAT_LLM_PROTOCOL`；接口地址一般包含服务要求的 `/v1` 前缀。
 3. Windows 在项目根目录执行：
 
    ```powershell

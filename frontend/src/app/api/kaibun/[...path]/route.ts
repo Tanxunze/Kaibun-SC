@@ -6,13 +6,14 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
-  const host = request.headers.get('host')?.split(':')[0];
+  const authority = request.headers.get('host');
+  const host = authority?.split(':')[0];
   if (host !== 'localhost' && host !== '127.0.0.1') return new Response(null, { status: 403 });
   const { path } = await context.params;
   if (path.some((part) => part === "." || part === "..")) return new Response(null, { status: 400 });
   if (request.method === "POST") {
     const origin = request.headers.get("origin");
-    if (origin && origin !== request.nextUrl.origin) return new Response(null, { status: 403 });
+    if (origin && origin !== `http://${authority}`) return new Response(null, { status: 403 });
   }
   try {
     const connection = JSON.parse(await readFile(resolve(process.cwd(), '../.runtime/connection.json'), 'utf8'));

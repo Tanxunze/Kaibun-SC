@@ -316,7 +316,7 @@ class Backgrounds:
         if not pending:
             return [scene.get("background") for scene in scenes]
         indexed = [card for card in catalog if card["indexed"] and card["type"] != "solid"]
-        if not indexed:
+        if not indexed or not self.adapter.model:
             for i in pending:
                 scenes[i].update(background=None, background_changes={})
             return [scene.get('background') for scene in scenes]

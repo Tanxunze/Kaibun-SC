@@ -230,7 +230,7 @@ class Wardrobe:
             if not options:
                 continue  # Name/avatar staging works without proprietary stand assets.
             existing = [i for i in range(len(scenes)) if cid in plans[i]]
-            if mode == 'fixed':
+            if mode == 'fixed' or not self.adapter.model:
                 default = DAILY_DEFAULTS.get(cid, self.adapter.characters[cid].default_outfit)
                 chosen = next((plans[i][cid] for i in existing), None) or requested.get(cid) or (default if self.outfit(cid,default) and automatic_outfit(default) else next((o['id'] for o in options if automatic_outfit(o['id'])),None))
                 if chosen is None:
@@ -346,6 +346,8 @@ async def complete_with_images(adapter, system, user, images):
     if not images or any(not isinstance(image, str) or not re.fullmatch(r"data:image/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+", image) for image in images):
         raise WardrobeError("衣装看图请求缺少有效图片")
     settings = adapter.settings
+    if settings is None:
+        raise WardrobeError("请在 .env 配置看图模型后再标注素材")
     from urllib.parse import urlsplit
     headers = {"x-goog-api-key": settings.api_key} if urlsplit(settings.base_url).hostname == "aiplatform.googleapis.com" and not settings.api_key.startswith("ya29.") else {"Authorization": f"Bearer {settings.api_key}"}
     body = {"model": settings.model, "stream": False}

@@ -21,8 +21,7 @@ def main():
     args = parser.parse_args()
     if not (ROOT / '.env').is_file():
         shutil.copyfile(ROOT / '.env.example', ROOT / '.env')
-        print('Created .env. Fill CHAT_LLM_API_KEY and CHAT_LLM_MODEL, then start again.')
-        return 1
+        print('Created .env. Local script import is available.')
     uv = shutil.which('uv')
     node, npm = shutil.which('node'), shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
     python = ROOT / ('backend/.venv/Scripts/python.exe' if os.name == 'nt' else 'backend/.venv/bin/python')
@@ -33,7 +32,7 @@ def main():
     elif not python.is_file():
         raise RuntimeError('Install uv, then reopen your terminal: https://docs.astral.sh/uv/getting-started/installation/')
     # Validate configuration without printing credentials or making provider requests.
-    check = "from paths import load_environment; load_environment(); from support.config import LLMSettings; LLMSettings.chat_from_env(); import os,json; print(json.dumps({'port':int(os.environ.get('KAIBUN_PORT') or '8011')}))"
+    check = "from paths import load_environment; load_environment(); from support.config import LLMSettings; LLMSettings.optional_from_env('CHAT'); import os,json; print(json.dumps({'port':int(os.environ.get('KAIBUN_PORT') or '8011')}))"
     result = subprocess.run([str(python), '-c', check], cwd=ROOT / 'backend', capture_output=True, text=True)
     if result.returncode:
         print('Backend configuration/dependencies are incomplete. Run: cd backend; uv sync --locked')

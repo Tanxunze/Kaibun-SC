@@ -68,6 +68,14 @@ class LLMSettings:
     """Merged into every request last (see `checked_extra_body`)."""
 
     @classmethod
+    def optional_from_env(cls, slot: str, fallback: str | None = None) -> "LLMSettings | None":
+        slots = [slot, fallback] if fallback else [slot]
+        for field in ("BASE_URL", "API_KEY", "MODEL"):
+            if not any(os.environ.get(f"{name}_LLM_{field}") for name in slots):
+                return None
+        return cls._from_env(slot, fallback)
+
+    @classmethod
     def chat_from_env(cls) -> "LLMSettings":
         return cls._from_env("CHAT")
 

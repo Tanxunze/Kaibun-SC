@@ -122,6 +122,10 @@ def create_app(store, adapter, api_token=None):
                     return await call_next(request)
         return await call_next(request)
 
+    def require_writing_model():
+        if not adapter.model:
+            raise HTTPException(409, '此功能需要文字模型，请在 .env 填写 CHAT_LLM_BASE_URL、CHAT_LLM_API_KEY 和 CHAT_LLM_MODEL 后重启。')
+
     def story_or_404(id):
         if id in deleting_stories:
             raise HTTPException(409, '故事正在删除，请稍候')
@@ -305,6 +309,7 @@ def create_app(store, adapter, api_token=None):
 
     @app.post("/stories", status_code=202)
     async def create(body: NewStory):
+        require_writing_model()
         if any(cid not in adapter.characters for cid in body.cast) or not body.premise.strip():
             raise HTTPException(422, "请检查想法和出场人物")
         if any(cid not in body.cast or adapter.outfit(cid, oid) is None for cid, oid in body.outfits.items()):
@@ -323,7 +328,7 @@ def create_app(store, adapter, api_token=None):
         return presentation(story_or_404(id))
 
     from revisions import install_revision_routes
-    install_revision_routes(app, store, adapter, author, exports, story_or_404, presentation)
+    install_revision_routes(app, store, adapter, author, exports, story_or_404, presentation, require_writing_model)
     from voice_jobs import install_voice_routes
     install_voice_routes(app, store, adapter, author, exports, story_or_404)
 
@@ -565,6 +570,8 @@ def create_app(store, adapter, api_token=None):
             raise HTTPException(409, "请等待当前调整完成")
         if doc.get('tuning') == 'script' and any(l.get('imported_untranslated') for scene in doc['scenes'] for l in scene['lines']):
             raise HTTPException(422, '导入内容尚未整理为双语台词，请先生成并应用修改预览，或逐句编辑日文和中文')
+        if doc.get("tuning") == "outline":
+            require_writing_model()
         doc["tuning"] = "script" if doc.get("tuning") == "outline" else "production"
         doc.update(status="queued", phase="准备生成", error=None)
         store.save(doc)
@@ -716,6 +723,7 @@ def create_app(store, adapter, api_token=None):
             return presentation(doc)
         progress = doc.get('revision_progress') or {}
         if doc.get('revision_request') and progress.get('status') in ('failed', 'interrupted'):
+            require_writing_model()
             doc['status'] = 'tuning'
             store.save(doc)
             return await app.state.resume_revision(id)
@@ -724,6 +732,8 @@ def create_app(store, adapter, api_token=None):
             store.save(doc)
             return presentation(doc)
         if doc["status"] != "ready":
+            if not doc.get("outline") or doc.get("continuation") or len(doc["scenes"]) < len(doc["outline"]["scenes"]):
+                require_writing_model()
             if len(author.tasks) >= 3 and id not in author.tasks:
                 raise HTTPException(409, "稍后再试")
             author.enqueue(id)
@@ -745,6 +755,7 @@ def create_app(store, adapter, api_token=None):
 
     @app.post("/stories/{id}/continue", status_code=202)
     async def extend(id: str, body: ContinueStory):
+        require_writing_model()
         doc = story_or_404(id)
         if not doc.get("outline") or len(doc["scenes"]) < len(doc["outline"]["scenes"]):
             raise HTTPException(409, "请先完成剧本")

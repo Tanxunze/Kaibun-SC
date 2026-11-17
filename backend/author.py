@@ -85,7 +85,7 @@ def validate_outline(raw, known, requested, length):
     if not isinstance(guests, list):
         raise StoryFormatError("大纲guests需要数组，未用配角时填写空数组")
     clean_guests = []
-    for guest in guests[:3]:
+    for guest in guests:
         if isinstance(guest, dict) and isinstance(guest.get("id"), str) and guest["id"].isascii() and guest["id"].replace("_", "").isalnum() and guest["id"] not in {*known, "producer", "narrator"} and isinstance(guest.get("name"), str):
             clean_guests.append({"id": guest["id"][:30], "name": guest["name"][:40]})
     return dict(cast=list(dict.fromkeys(cast)),
